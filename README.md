@@ -1,10 +1,20 @@
-# Data Table Manager
+# LB Manager
 
 A powerful desktop application for managing comic/magazine data with intelligent parsing, table management, and multiple export formats.
 
 ![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
 ![PyQt6](https://img.shields.io/badge/GUI-PyQt6-green.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
+
+## Work by Deepseek (human part)
+- Please note that this project is **completely** developed by Deepseek, including the .gitignore, LICENSE and this README.md.
+- Some suggestions are from Gemini.
+- The only human-writing part is this "Work by Deepseek".
+- For how I talked with Deepseek, you may refer to
+[LB Manager1](https://chat.deepseek.com/share/3obgs4qu64a2a3cwob)
+[LB Manager2](https://chat.deepseek.com/share/ebciv0840kft07w5im)
+[LB Manager3](https://chat.deepseek.com/share/w5brtav9poideqxm6z)
+[LB Manager4](https://chat.deepseek.com/share/b29dy7p1ip7sbjqxu2)
 
 ## Features
 
@@ -64,9 +74,9 @@ A powerful desktop application for managing comic/magazine data with intelligent
 ## Usage
 
 ### Starting the Application
-    ```bash
-    python main.py
-    ```
+```bash
+python main.py
+```
 
 ### Basic Workflow
 
@@ -94,29 +104,29 @@ A powerful desktop application for managing comic/magazine data with intelligent
 - `Enter` in insert dialog - Confirm input
 
 ## Project Structure
-    ```text
-    data_table_manager/
-    ├── main.py                 # Application entry point
-    ├── models/                 # Data models and business logic
-    │   ├── config_manager.py   # Configuration management
-    │   ├── data_parser.py      # Intelligent text parsing
-    │   └── zip_image_manager.py # ZIP image operations
-    ├── views/                  # User interface components
-    │   ├── main_window.py      # Main application window
-    │   ├── dialogs.py          # Various dialogs (insert, search)
-    │   ├── image_viewer.py     # ZIP image viewer
-    │   └── enhanced_table.py   # Enhanced table widget
-    ├── controllers/            # Application controllers
-    │   ├── file_io.py          # File operations (TXT, XLSX, JSON)
-    │   ├── table_controller.py # Table data management
-    │   ├── web_controller.py   # Web and settings control
-    │   ├── state_manager.py    # UI state management
-    │   └── table_visual_manager.py # Table visual features
-    └── utils/                  # Utility functions
-        ├── file_locator.py     # File search utilities
-        ├── user_agents.py      # Random User-Agent generation
-        └── helpers.py          # Helper functions
-    ```
+```text
+data_table_manager/
+├── main.py                 # Application entry point
+├── models/                 # Data models and business logic
+│   ├── config_manager.py   # Configuration management
+│   ├── data_parser.py      # Intelligent text parsing
+│   └── zip_image_manager.py # ZIP image operations
+├── views/                  # User interface components
+│   ├── main_window.py      # Main application window
+│   ├── dialogs.py          # Various dialogs (insert, search)
+│   ├── image_viewer.py     # ZIP image viewer
+│   └── enhanced_table.py   # Enhanced table widget
+├── controllers/            # Application controllers
+│   ├── file_io.py          # File operations (TXT, XLSX, JSON)
+│   ├── table_controller.py # Table data management
+│   ├── web_controller.py   # Web and settings control
+│   ├── state_manager.py    # UI state management
+│   └── table_visual_manager.py # Table visual features
+└── utils/                  # Utility functions
+    ├── file_locator.py     # File search utilities
+    ├── user_agents.py      # Random User-Agent generation
+    └── helpers.py          # Helper functions
+```
 
 ## Configuration
 - The application automatically creates a `config.ini` file with the following sections:
