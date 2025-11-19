@@ -1,4 +1,4 @@
-# Data Table Manager
+# LB Manager
 
 A powerful desktop application for managing comic/magazine data with intelligent parsing, table management, and multiple export formats.
 
