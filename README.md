@@ -6,6 +6,16 @@ A powerful desktop application for managing comic/magazine data with intelligent
 ![PyQt6](https://img.shields.io/badge/GUI-PyQt6-green.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
+## Work by Deepseek (human part)
+- Please note that this project is **completely** developed by Deepseek, including the .gitignore, LICENSE and this README.md.
+- Some suggestions are from Gemini.
+- The only human-writing part is this "Work by Deepseek".
+- For how I talked with Deepseek, you may refer to
+[LB Manager1](https://chat.deepseek.com/share/3obgs4qu64a2a3cwob)
+[LB Manager2](https://chat.deepseek.com/share/ebciv0840kft07w5im)
+[LB Manager3](https://chat.deepseek.com/share/w5brtav9poideqxm6z)
+[LB Manager4](https://chat.deepseek.com/share/b29dy7p1ip7sbjqxu2)
+
 ## Features
 
 ### 🎯 Core Functionality
