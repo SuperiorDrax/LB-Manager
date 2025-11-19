@@ -53,7 +53,7 @@ A powerful desktop application for managing comic/magazine data with intelligent
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/data-table-manager.git
+   git clone https://github.com/SuperiorDrax/LB-Manager.git
    cd data-table-manager
    ```
 
