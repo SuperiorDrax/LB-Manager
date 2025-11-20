@@ -35,7 +35,7 @@ class FileIO:
                 QMessageBox.critical(self.main_window, "Import Error", f"Cannot open file: {str(e)}")
 
     def import_from_json(self, file_path):
-        """Import data from JSON file"""
+        """Import data from JSON file with tag support"""
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
@@ -65,14 +65,15 @@ class FileIO:
                     show = str(row_data.get('show', ''))
                     magazine = str(row_data.get('magazine', ''))
                     origin = str(row_data.get('origin', ''))
+                    tag = str(row_data.get('tag', ''))  # 新增tag字段
                     
                     # Validate required fields
                     if not websign or not author or not title:
                         error_rows.append((index + 1, f"Missing required fields: websign='{websign}', author='{author}', title='{title}'"))
                         continue
                     
-                    # Add to table
-                    self.main_window.table_controller.add_to_table((author, title, group, show, magazine, origin, websign))
+                    # Add to table with tag
+                    self.main_window.table_controller.add_to_table((author, title, group, show, magazine, origin, websign, tag))
                     success_count += 1
                     
                 except Exception as e:
@@ -98,7 +99,7 @@ class FileIO:
             QMessageBox.critical(self.main_window, "Import Error", f"Cannot import JSON file: {str(e)}")
 
     def import_from_xlsx(self, file_path):
-        """Import data from XLSX file"""
+        """Import data from XLSX file with tag support"""
         try:
             # Read Excel file
             df = pd.read_excel(file_path, sheet_name='Data')
@@ -117,7 +118,7 @@ class FileIO:
             for index, row in df.iterrows():
                 try:
                     # Convert row to tuple format expected by table controller
-                    # Order: author, title, group, show, magazine, origin, websign
+                    # Order: author, title, group, show, magazine, origin, websign, tag
                     websign = str(row['websign']) if pd.notna(row['websign']) else ""
                     author = str(row['author']) if pd.notna(row['author']) else ""
                     title = str(row['title']) if pd.notna(row['title']) else ""
@@ -125,14 +126,15 @@ class FileIO:
                     show = str(row['show']) if 'show' in df.columns and pd.notna(row['show']) else ""
                     magazine = str(row['magazine']) if 'magazine' in df.columns and pd.notna(row['magazine']) else ""
                     origin = str(row['origin']) if 'origin' in df.columns and pd.notna(row['origin']) else ""
+                    tag = str(row['tag']) if 'tag' in df.columns and pd.notna(row['tag']) else ""
                     
                     # Validate required fields
                     if not websign or not author or not title:
                         error_rows.append((index + 2, f"Missing required fields: websign='{websign}', author='{author}', title='{title}'"))
                         continue
                     
-                    # Add to table
-                    self.main_window.table_controller.add_to_table((author, title, group, show, magazine, origin, websign))
+                    # Add to table with tag
+                    self.main_window.table_controller.add_to_table((author, title, group, show, magazine, origin, websign, tag))
                     success_count += 1
                     
                 except Exception as e:
@@ -216,24 +218,47 @@ class FileIO:
         )
         
         if file_path:
-            if file_path.endswith('.xlsx'):
+            if file_path.endswith('.txt'):
+                # Show warning for TXT format
+                reply = QMessageBox.warning(
+                    self.main_window,
+                    "Tag Data Warning",
+                    "Saving as TXT format will lose tag information.\n\n"
+                    "Do you want to continue?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    if not file_path.endswith('.txt'):
+                        file_path += '.txt'
+                    self.save_to_file_txt(file_path)
+            elif file_path.endswith('.xlsx'):
                 self.save_to_xlsx(file_path)
             elif file_path.endswith('.json'):
                 self.save_to_json(file_path)
             else:
-                # Default to TXT format
-                if not file_path.endswith('.txt'):
-                    file_path += '.txt'
-                self.save_to_file_txt(file_path)
+                # Default to TXT with warning
+                reply = QMessageBox.warning(
+                    self.main_window,
+                    "Tag Data Warning",
+                    "Saving as TXT format will lose tag information.\n\n"
+                    "Do you want to continue?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    if not file_path.endswith('.txt'):
+                        file_path += '.txt'
+                    self.save_to_file_txt(file_path)
 
     def save_to_json(self, file_path):
-        """Save data to JSON format"""
+        """Save data to JSON format with tag column"""
         try:
             # Prepare data structure
             data = {
                 "version": 1,
                 "format": "data_table",
-                "columns": ['websign', 'author', 'title', 'group', 'show', 'magazine', 'origin'],
+                "columns": ['websign', 'author', 'title', 'group', 'show', 'magazine', 'origin', 'tag'],  # 添加tag
                 "data": []
             }
             
@@ -254,7 +279,7 @@ class FileIO:
                         row_data[col_name] = ""
                 data["data"].append(row_data)
             
-            # Save to JSON file with indentation for readability
+            # Save to JSON file
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             
@@ -266,15 +291,15 @@ class FileIO:
             QMessageBox.critical(self.main_window, "Save Error", f"Cannot save JSON file: {str(e)}")
 
     def save_to_xlsx(self, file_path):
-        """Save data to XLSX format"""
+        """Save data to XLSX format with tag column"""
         try:
             # Prepare data for DataFrame
             data = []
-            column_headers = ['websign', 'author', 'title', 'group', 'show', 'magazine', 'origin']
+            column_headers = ['websign', 'author', 'title', 'group', 'show', 'magazine', 'origin', 'tag']
             
             for row in range(self.main_window.table.rowCount()):
                 row_data = []
-                for col in range(7):  # 7 columns
+                for col in range(8):
                     item = self.main_window.table.item(row, col)
                     if item:
                         # Handle websign special case
@@ -307,7 +332,7 @@ class FileIO:
                                 max_length = len(str(cell.value))
                         except:
                             pass
-                    adjusted_width = min(max_length + 2, 50)  # Cap at 50 characters
+                    adjusted_width = min(max_length + 2, 50)
                     worksheet.column_dimensions[column_letter].width = adjusted_width
             
             QMessageBox.information(self.main_window, "Save", 
@@ -317,91 +342,67 @@ class FileIO:
         except Exception as e:
             QMessageBox.critical(self.main_window, "Save Error", f"Cannot save XLSX file: {str(e)}")
 
-    def save_to_file_txt(self):
-        """Save data in TXT format"""
-        if self.main_window.table.rowCount() == 0:
-            QMessageBox.warning(self.main_window, "Save", "No data to save.")
-            return
-        
-        # Check for duplicates before saving
-        duplicates = self.check_duplicates_before_save()
-        if duplicates and not self.confirm_save_with_duplicates(duplicates):
-            return  # User canceled save
-        
-        # Proceed with saving
-        file_path, _ = QFileDialog.getSaveFileName(
-            self.main_window, 
-            "Save as TXT File", 
-            "", 
-            "Text Files (*.txt);;All Files (*)"
-        )
-        
-        if file_path:
-            # Ensure file extension
-            if not file_path.endswith('.txt'):
-                file_path += '.txt'
-                
-            try:
-                with open(file_path, 'w', encoding='utf-8') as file:
-                    for row in range(self.main_window.table.rowCount()):
-                        # Get data with new column order
-                        websign_item = self.main_window.table.item(row, 0)
-                        if websign_item:
-                            # Handle custom websign item
-                            websign = websign_item.data(Qt.ItemDataRole.UserRole)
-                            if not websign:
-                                websign = websign_item.text()
-                        else:
-                            websign = ""
-                            
-                        author = self.main_window.table.item(row, 1).text() if self.main_window.table.item(row, 1) else ""
-                        title = self.main_window.table.item(row, 2).text() if self.main_window.table.item(row, 2) else ""
-                        group = self.main_window.table.item(row, 3).text() if self.main_window.table.item(row, 3) else ""
-                        show = self.main_window.table.item(row, 4).text() if self.main_window.table.item(row, 4) else ""
-                        magazine = self.main_window.table.item(row, 5).text() if self.main_window.table.item(row, 5) else ""
-                        origin = self.main_window.table.item(row, 6).text() if self.main_window.table.item(row, 6) else ""
+    def save_to_file_txt(self, file_path):
+        """Save data in TXT format (tag data will be lost)"""
+        try:
+            with open(file_path, 'w', encoding='utf-8') as file:
+                for row in range(self.main_window.table.rowCount()):
+                    # Get data - tag column (index 7) is ignored
+                    websign_item = self.main_window.table.item(row, 0)
+                    if websign_item:
+                        websign = websign_item.data(Qt.ItemDataRole.UserRole)
+                        if not websign:
+                            websign = websign_item.text()
+                    else:
+                        websign = ""
                         
-                        # Reconstruct the original format with new author/group logic
-                        parts = []
-                        
-                        # Add websign at the beginning
-                        if websign:
-                            parts.append(websign)
+                    author = self.main_window.table.item(row, 1).text() if self.main_window.table.item(row, 1) else ""
+                    title = self.main_window.table.item(row, 2).text() if self.main_window.table.item(row, 2) else ""
+                    group = self.main_window.table.item(row, 3).text() if self.main_window.table.item(row, 3) else ""
+                    show = self.main_window.table.item(row, 4).text() if self.main_window.table.item(row, 4) else ""
+                    magazine = self.main_window.table.item(row, 5).text() if self.main_window.table.item(row, 5) else ""
+                    origin = self.main_window.table.item(row, 6).text() if self.main_window.table.item(row, 6) else ""
+                    
+                    # Reconstruct the original format (tag is not included)
+                    parts = []
+                    
+                    # Add websign at the beginning
+                    if websign:
+                        parts.append(websign)
 
-                        # Add show info (after websign, before author)
-                        if show:
-                            parts.append(f"({show})")
+                    # Add show info
+                    if show:
+                        parts.append(f"({show})")
 
-                        # Build author part with new logic
-                        author_part = ""
-                        if group and author:
-                            # Format: [group (author)]
-                            author_part = f"{group} ({author})"
-                        elif author:
-                            # Format: [author]
-                            author_part = author
+                    # Build author part
+                    author_part = ""
+                    if group and author:
+                        author_part = f"{group} ({author})"
+                    elif author:
+                        author_part = author
 
-                        if author_part:
-                            parts.append(f"[{author_part}]")
+                    if author_part:
+                        parts.append(f"[{author_part}]")
 
-                        # Add title
-                        if title:
-                            parts.append(title)
+                    # Add title
+                    if title:
+                        parts.append(title)
 
-                        # Add origin/magazine
-                        if magazine:
-                            parts.append(f"({magazine})")
-                        elif origin:
-                            parts.append(f"({origin})")
+                    # Add origin/magazine
+                    if magazine:
+                        parts.append(f"({magazine})")
+                    elif origin:
+                        parts.append(f"({origin})")
 
-                        file.write(" ".join(parts) + "\n")
-                
-                QMessageBox.information(self.main_window, "Save", 
-                                      f"Data saved in TXT format successfully.\n"
-                                      f"Rows: {self.main_window.table.rowCount()}")
-                
-            except Exception as e:
-                QMessageBox.critical(self.main_window, "Save Error", f"Cannot save file: {str(e)}")
+                    file.write(" ".join(parts) + "\n")
+            
+            QMessageBox.information(self.main_window, "Save", 
+                                  f"Data saved in TXT format successfully.\n"
+                                  f"Rows: {self.main_window.table.rowCount()}\n"
+                                  f"Note: Tag information was not saved in TXT format.")
+            
+        except Exception as e:
+            QMessageBox.critical(self.main_window, "Save Error", f"Cannot save file: {str(e)}")
 
     def check_duplicates_before_save(self):
         """Check for duplicate websign values before saving"""

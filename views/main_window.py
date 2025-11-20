@@ -11,6 +11,9 @@ from controllers.table_visual_manager import TableVisualManager
 from views.enhanced_table import EnhancedTableWidget
 import os
 import re
+import requests
+from bs4 import BeautifulSoup
+from utils.user_agents import get_random_user_agent
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -57,9 +60,9 @@ class MainWindow(QMainWindow):
         
         # Create table using enhanced version
         self.table = EnhancedTableWidget()
-        self.table.setColumnCount(7)
+        self.table.setColumnCount(8)
         self.table.setHorizontalHeaderLabels([
-            'websign', 'author', 'title', 'group', 'show', 'magazine', 'origin'
+            'websign', 'author', 'title', 'group', 'show', 'magazine', 'origin', 'tag'
         ])
         
         # Set column widths
@@ -70,6 +73,7 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(4, 100)
         self.table.setColumnWidth(5, 120)
         self.table.setColumnWidth(6, 120)
+        self.table.setColumnWidth(7, 150)
         
         # Enable other table features
         self.table.setSortingEnabled(True)
@@ -161,6 +165,7 @@ class MainWindow(QMainWindow):
         
         view_zip_action = context_menu.addAction("View")
         view_online_action = context_menu.addAction("View online")
+        update_tag_action = context_menu.addAction("Update Tag")
         copy_action = context_menu.addAction("Copy to clipboard")
         delete_action = context_menu.addAction("Delete")
         
@@ -169,6 +174,7 @@ class MainWindow(QMainWindow):
         view_online_action.triggered.connect(lambda: self.web_controller.view_online(row))
         view_zip_action.triggered.connect(lambda: self.web_controller.view_zip_images(row))
         delete_action.triggered.connect(lambda: self.visual_manager.delete_rows([row]))
+        update_tag_action.triggered.connect(lambda: self.web_controller.update_tag_for_row(row))
         
         # Show menu
         context_menu.exec(self.table.viewport().mapToGlobal(position))
@@ -180,11 +186,13 @@ class MainWindow(QMainWindow):
         dialog = InsertDialog(self, self.jm_website_value)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             text = dialog.get_input_text()
+            tag_text = dialog.get_tag_text()
             if text:
                 parsed_data = DataParser.parse_text(text)
-                # No need for validation here since dialog already validated
                 if parsed_data is not None:
-                    self.table_controller.add_to_table(parsed_data)
+                    data_list = list(parsed_data)
+                    data_list[-1] = tag_text
+                    self.table_controller.add_to_table(tuple(data_list))
     
     def show_search_dialog(self):
         dialog = SearchDialog(self)

@@ -24,9 +24,10 @@ class StateManager:
             window_state = self.config_manager.get_window_state()
             geo_str = window_state['geometry']
         
-        # Save table geometry
+        # Save table geometry - dynamic column count
         table_geometry = []
-        for i in range(self.main_window.table.columnCount()):
+        current_column_count = self.main_window.table.columnCount()
+        for i in range(current_column_count):
             table_geometry.append(str(self.main_window.table.columnWidth(i)))
         
         self.config_manager.set_window_state(
@@ -65,7 +66,8 @@ class StateManager:
         """Save only table geometry (called on column resize)"""
         window_state = self.config_manager.get_window_state()
         table_geometry = []
-        for i in range(self.main_window.table.columnCount()):
+        current_column_count = self.main_window.table.columnCount()
+        for i in range(current_column_count):
             table_geometry.append(str(self.main_window.table.columnWidth(i)))
         
         self.config_manager.set_window_state(
@@ -75,65 +77,152 @@ class StateManager:
         )
 
     def restore_table_geometry(self):
-        """Restore table column widths"""
+        """Restore table column widths - dynamic column count"""
         window_state = self.config_manager.get_window_state()
         if window_state['table_geometry']:
             try:
                 widths = list(map(int, window_state['table_geometry'].split(',')))
-                if len(widths) == 7:
-                    for i, width in enumerate(widths):
-                        if width >= 20:  # Reasonable minimum width
-                            self.main_window.table.setColumnWidth(i, width)
+                current_column_count = self.main_window.table.columnCount()
+                
+                # Apply saved widths for available columns
+                for i, width in enumerate(widths):
+                    if i < current_column_count and width >= 20:  # Reasonable minimum width
+                        self.main_window.table.setColumnWidth(i, width)
             except ValueError:
                 pass  # Use default column widths
     
     def save_column_config(self):
-        """Save column visibility and order configuration"""
+        """Save column visibility and order configuration - dynamic column count"""
         # Get current visibility
         visible = []
-        for i in range(self.main_window.table.columnCount()):
+        current_column_count = self.main_window.table.columnCount()
+        for i in range(current_column_count):
             visible.append(not self.main_window.table.isColumnHidden(i))
         
         # Get current visual order
         order = []
-        for i in range(self.main_window.table.columnCount()):
+        for i in range(current_column_count):
             order.append(self.main_window.table.horizontalHeader().visualIndex(i))
         
         self.config_manager.set_column_config(visible, order)
 
     def restore_table_state(self, window_state, column_config):
-        """Restore table geometry and column configuration"""
+        """Restore table geometry and column configuration with dynamic column count support"""
+        current_column_count = self.main_window.table.columnCount()
+        
         # Restore column widths
-        if window_state['table_geometry']:
-            try:
-                widths = list(map(int, window_state['table_geometry'].split(',')))
-                if len(widths) == 7:
-                    for i, width in enumerate(widths):
-                        if width >= 20:
-                            self.main_window.table.setColumnWidth(i, width)
-            except ValueError:
-                pass
+        self.restore_column_widths(window_state, current_column_count)
         
         # Restore column visibility and order
-        if len(column_config['visible']) == 7 and len(column_config['order']) == 7:
-            # Apply column visibility
-            for i, visible in enumerate(column_config['visible']):
-                self.main_window.table.setColumnHidden(i, not visible)
+        self.restore_column_visibility_and_order(column_config, current_column_count)
+
+    def restore_column_widths(self, window_state, current_column_count):
+        """Restore column widths from saved configuration"""
+        if window_state and window_state.get('table_geometry'):
+            try:
+                widths = list(map(int, window_state['table_geometry'].split(',')))
+                
+                # Apply saved widths for available columns
+                for i, width in enumerate(widths):
+                    if i < current_column_count and width >= 20:  # Reasonable minimum width
+                        self.main_window.table.setColumnWidth(i, width)
+                        
+                # Set default width for any new columns that weren't in saved config
+                default_width = 100
+                for i in range(len(widths), current_column_count):
+                    self.main_window.table.setColumnWidth(i, default_width)
+                    
+            except (ValueError, AttributeError):
+                # Use default column widths if saved config is invalid
+                self.set_default_column_widths(current_column_count)
+
+    def restore_column_visibility_and_order(self, column_config, current_column_count):
+        """Restore column visibility and order from saved configuration"""
+        if not column_config:
+            # No saved configuration, set all columns visible in default order
+            self.set_all_columns_visible(current_column_count)
+            return
+        
+        saved_visible = column_config.get('visible', [])
+        saved_order = column_config.get('order', [])
+        
+        # Restore column visibility
+        self.restore_column_visibility(saved_visible, current_column_count)
+        
+        # Restore column order
+        self.restore_column_order(saved_order, current_column_count)
+
+    def restore_column_visibility(self, saved_visible, current_column_count):
+        """Restore column visibility settings"""
+        if saved_visible:
+            # Apply saved visibility for available columns
+            for i, visible in enumerate(saved_visible):
+                if i < current_column_count:
+                    self.main_window.table.setColumnHidden(i, not visible)
             
-            # Apply column order - need to reorder based on saved visual indices
-            # Create a mapping from logical to visual index
-            visual_to_logical = {}
-            for logical_index in range(self.main_window.table.columnCount()):
-                visual_index = column_config['order'][logical_index]
-                visual_to_logical[visual_index] = logical_index
-            
-            # Move columns to their saved positions
-            for visual_index in range(self.main_window.table.columnCount()):
-                if visual_index in visual_to_logical:
-                    logical_index = visual_to_logical[visual_index]
-                    current_visual = self.main_window.table.horizontalHeader().visualIndex(logical_index)
-                    if current_visual != visual_index:
-                        self.main_window.table.horizontalHeader().moveSection(current_visual, visual_index)
+            # Set new columns (beyond saved config) to visible by default
+            for i in range(len(saved_visible), current_column_count):
+                self.main_window.table.setColumnHidden(i, False)
+        else:
+            # No saved visibility, set all columns visible
+            self.set_all_columns_visible(current_column_count)
+
+    def restore_column_order(self, saved_order, current_column_count):
+        """Restore column order from saved configuration"""
+        if saved_order and len(saved_order) >= current_column_count:
+            try:
+                # Create mapping from logical to visual index
+                visual_to_logical = {}
+                for logical_index in range(current_column_count):
+                    if logical_index < len(saved_order):
+                        visual_index = saved_order[logical_index]
+                        if visual_index < current_column_count:
+                            visual_to_logical[visual_index] = logical_index
+                
+                # Move columns to their saved positions
+                for visual_index in range(current_column_count):
+                    if visual_index in visual_to_logical:
+                        logical_index = visual_to_logical[visual_index]
+                        if logical_index < current_column_count:
+                            current_visual = self.main_window.table.horizontalHeader().visualIndex(logical_index)
+                            if current_visual != visual_index:
+                                self.main_window.table.horizontalHeader().moveSection(current_visual, visual_index)
+                                
+            except (IndexError, ValueError):
+                # If there's any error in restoring order, use default order
+                self.reset_column_order(current_column_count)
+        else:
+            # Saved order doesn't match current column count, reset to default
+            self.reset_column_order(current_column_count)
+
+    def set_all_columns_visible(self, column_count):
+        """Set all columns to visible"""
+        for i in range(column_count):
+            self.main_window.table.setColumnHidden(i, False)
+
+    def set_default_column_widths(self, column_count):
+        """Set default column widths"""
+        default_widths = {
+            0: 80,   # websign
+            1: 120,  # author
+            2: 200,  # title
+            3: 100,  # group
+            4: 100,  # show
+            5: 120,  # magazine
+            6: 120,  # origin
+            7: 150   # tag
+        }
+        
+        for i in range(column_count):
+            width = default_widths.get(i, 100)  # Default to 100 for any additional columns
+            self.main_window.table.setColumnWidth(i, width)
+
+    def reset_column_order(self, column_count):
+        """Reset column order to default logical order"""
+        for logical_index in range(column_count):
+            current_visual = self.main_window.table.horizontalHeader().visualIndex(logical_index)
+            if current_visual != logical_index:
+                self.main_window.table.horizontalHeader().moveSection(current_visual, logical_index)
 
     def on_column_moved(self, logicalIndex, oldVisualIndex, newVisualIndex):
         """Handle column reordering with debounced saving"""

@@ -11,7 +11,7 @@ class InsertDialog(QDialog):
         self.jm_website = jm_website
         self.setWindowTitle("Insert Data")
         self.setModal(True)
-        self.resize(500, 100)
+        self.resize(500, 150)
         
         layout = QVBoxLayout()
         layout.setSpacing(6)
@@ -31,6 +31,15 @@ class InsertDialog(QDialog):
         # Original input field
         self.input_label = QLabel("Or enter text to parse:")
         self.input_field = QLineEdit()
+
+        # Tag input field
+        tag_layout = QHBoxLayout()
+        tag_label = QLabel("Tags:")
+        self.tag_input = QLineEdit()
+        self.tag_input.setPlaceholderText("Enter tags manually or use Fetch to auto-fill...")
+        
+        tag_layout.addWidget(tag_label)
+        tag_layout.addWidget(self.tag_input)
         
         # Buttons
         button_layout = QHBoxLayout()
@@ -44,6 +53,7 @@ class InsertDialog(QDialog):
         layout.addLayout(jm_layout)
         layout.addWidget(self.input_label)
         layout.addWidget(self.input_field)
+        layout.addLayout(tag_layout)
         layout.addLayout(button_layout)
         
         self.setLayout(layout)
@@ -56,9 +66,6 @@ class InsertDialog(QDialog):
     
     def fetch_website_data(self):
         """Fetch data from JM website based on JM number with async operation"""
-        from PyQt6.QtWidgets import QProgressDialog
-        from PyQt6.QtCore import Qt
-        
         jm_number = self.jm_input.text().strip()
         if not jm_number:
             QMessageBox.warning(self, "Input Error", "Please enter a JM number.")
@@ -93,7 +100,7 @@ class InsertDialog(QDialog):
                 self.progress_dialog.close()
             QMessageBox.critical(self, "Fetch Error", f"Failed to start fetch: {str(e)}")
     
-    def on_fetch_finished(self, extracted_texts):
+    def on_fetch_finished(self, result_data):
         """Handle successful data fetch"""
         # Ensure progress dialog is closed
         if hasattr(self, 'progress_dialog'):
@@ -103,13 +110,20 @@ class InsertDialog(QDialog):
         self.fetch_button.setEnabled(True)
         self.fetch_button.setText("Fetch")
         
-        if extracted_texts:
+        if result_data and 'extracted_texts' in result_data:
             # Use the first extracted text and prepend JM number
             jm_number = self.jm_input.text().strip()
-            fetched_text = extracted_texts[0]
+            fetched_text = result_data['extracted_texts'][0]
             combined_text = f"{jm_number} {fetched_text}"
             self.input_field.setText(combined_text)
-            QMessageBox.information(self, "Success", "Data fetched successfully!")
+            
+            # Fill tags if available
+            if 'tags' in result_data and result_data['tags']:
+                tag_text = ", ".join(result_data['tags'])
+                self.tag_input.setText(tag_text)
+                QMessageBox.information(self, "Success", "Data and tags fetched successfully!")
+            else:
+                QMessageBox.information(self, "Success", "Data fetched successfully! (No tags found)")
         else:
             QMessageBox.warning(self, "No Data", "Could not extract data from the webpage.")
     
@@ -128,6 +142,10 @@ class InsertDialog(QDialog):
     def get_input_text(self):
         """Get the final input text from either field"""
         return self.input_field.text().strip()
+
+    def get_tag_text(self):
+        """Get the tag text"""
+        return self.tag_input.text().strip()
     
     def validate_and_accept(self):
         """Validate input before closing dialog"""
@@ -168,7 +186,7 @@ class SearchDialog(QDialog):
         # First condition row
         condition1_layout = QHBoxLayout()
         self.column_combo1 = QComboBox()
-        self.column_combo1.addItems(['author', 'title', 'group', 'show', 'magazine', 'origin', 'websign'])
+        self.column_combo1.addItems(['author', 'title', 'group', 'show', 'magazine', 'origin', 'websign', 'tag'])
         self.search_field1 = QLineEdit()
         self.search_field1.setPlaceholderText("Enter search text...")
         
@@ -189,7 +207,7 @@ class SearchDialog(QDialog):
         # Second condition row
         condition2_layout = QHBoxLayout()
         self.column_combo2 = QComboBox()
-        self.column_combo2.addItems(['author', 'title', 'group', 'show', 'magazine', 'origin', 'websign'])
+        self.column_combo2.addItems(['author', 'title', 'group', 'show', 'magazine', 'origin', 'websign', 'tag'])
         self.search_field2 = QLineEdit()
         self.search_field2.setPlaceholderText("Optional second condition...")
         
@@ -319,8 +337,8 @@ Leave unchecked for simple text search.
 
 class JMDataFetchThread(QThread):
     """Background thread for fetching JM data in insert dialog"""
-    finished = pyqtSignal(list)  # extracted_texts list
-    error = pyqtSignal(str)  # error_message
+    finished = pyqtSignal(dict)  # Changed to dict to include both extracted_texts and tags
+    error = pyqtSignal(str)      # error_message
     
     def __init__(self, jm_number, jm_website):
         super().__init__()
@@ -340,7 +358,16 @@ class JMDataFetchThread(QThread):
             # Extract dynamic text
             extracted_texts = self.extract_dynamic_text(html_content)
             
-            self.finished.emit(extracted_texts)
+            # Extract tags
+            tags = self.extract_tags(html_content)
+            
+            # Return both data and tags
+            result = {
+                'extracted_texts': extracted_texts,
+                'tags': tags
+            }
+            
+            self.finished.emit(result)
             
         except Exception as e:
             self.error.emit(str(e))
@@ -400,3 +427,19 @@ class JMDataFetchThread(QThread):
                 unique_texts.append(text)
         
         return unique_texts
+    
+    def extract_tags(self, html_content):
+        """Extract tags from HTML using the specified CSS selector"""
+        soup = BeautifulSoup(html_content, 'html.parser')
+        
+        # Find all tag elements using the specified CSS selector
+        tag_elements = soup.select('span[data-type="tags"] a.btn.phone-tags-tag')
+        
+        # Extract text from each tag element
+        tags = []
+        for tag_element in tag_elements:
+            tag_text = tag_element.get_text(strip=True)
+            if tag_text:
+                tags.append(tag_text)
+        
+        return tags

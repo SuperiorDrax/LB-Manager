@@ -1,5 +1,7 @@
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QMessageBox, QFileDialog
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
+                           QLineEdit, QPushButton, QMessageBox, QFileDialog, 
+                           QProgressDialog, QTableWidgetItem)
+from PyQt6.QtCore import QThread, pyqtSignal, Qt
 import requests
 from bs4 import BeautifulSoup
 import webbrowser
@@ -363,6 +365,81 @@ class WebController:
             
         except Exception as e:
             QMessageBox.critical(self.main_window, "View Error", f"Failed to view ZIP images: {str(e)}")
+    
+    def update_tag_for_row(self, row):
+        """Update tag for specified row by fetching from website"""
+        try:
+            # Get websign from the row
+            table = self.main_window.table
+            websign_item = table.item(row, 0)
+            if not websign_item:
+                QMessageBox.warning(self.main_window, "Update Tag Error", "No websign found for this row.")
+                return
+            
+            websign = websign_item.data(Qt.ItemDataRole.UserRole)
+            if not websign:
+                websign = websign_item.text()
+            
+            if not websign:
+                QMessageBox.warning(self.main_window, "Update Tag Error", "Invalid websign value.")
+                return
+            
+            # Get JM website from config
+            jm_website = self.config_manager.get_jm_website()
+            if not jm_website:
+                QMessageBox.warning(self.main_window, "Update Tag Error", "JM website is not configured.")
+                return
+            
+            # Construct URL
+            url = f"https://{jm_website}/album/{websign}"
+            
+            # Show progress dialog
+            progress_dialog = QProgressDialog(f"Fetching tags for websign {websign}...", "Cancel", 0, 0, self.main_window)
+            progress_dialog.setWindowTitle("Updating Tag")
+            progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+            progress_dialog.show()
+            
+            # Create and start background thread
+            self.tag_fetch_thread = TagFetchThread(url, websign)
+            self.tag_fetch_thread.finished.connect(lambda tags: self.on_tag_fetch_finished(row, tags, progress_dialog))
+            self.tag_fetch_thread.error.connect(lambda error: self.on_tag_fetch_error(error, progress_dialog))
+            self.tag_fetch_thread.start()
+            
+        except Exception as e:
+            QMessageBox.critical(self.main_window, "Update Tag Error", f"Failed to start tag update: {str(e)}")
+    
+    def on_tag_fetch_finished(self, row, tags, progress_dialog):
+        """Handle successful tag fetch"""
+        progress_dialog.close()
+        
+        if tags:
+            # Join multiple tags with comma
+            tag_text = ", ".join(tags)
+            
+            # Update the tag column (column 7)
+            tag_item = QTableWidgetItem(tag_text)
+            self.main_window.table.setItem(row, 7, tag_item)
+            
+            QMessageBox.information(self.main_window, "Update Tag", 
+                                  f"Successfully updated tags for websign {self.get_websign_from_row(row)}:\n\n{tag_text}")
+        else:
+            QMessageBox.information(self.main_window, "Update Tag", 
+                                  f"No tags found for websign {self.get_websign_from_row(row)}")
+    
+    def on_tag_fetch_error(self, error_msg, progress_dialog):
+        """Handle tag fetch error"""
+        progress_dialog.close()
+        QMessageBox.critical(self.main_window, "Update Tag Error", f"Failed to fetch tags: {error_msg}")
+    
+    def get_websign_from_row(self, row):
+        """Helper method to get websign from row"""
+        websign_item = self.main_window.table.item(row, 0)
+        if websign_item:
+            websign = websign_item.data(Qt.ItemDataRole.UserRole)
+            if not websign:
+                websign = websign_item.text()
+            return websign
+        return ""
 
 class WebsiteRefreshThread(QThread):
     """Background thread for website refresh operation"""
@@ -405,3 +482,65 @@ class WebsiteRefreshThread(QThread):
         except Exception as e:
             self.error.emit(f"Unexpected error: {str(e)}")
 
+class TagFetchThread(QThread):
+    """Background thread for fetching tags from website"""
+    finished = pyqtSignal(list)  # list of tags
+    error = pyqtSignal(str)      # error message
+    
+    def __init__(self, url, websign):
+        super().__init__()
+        self.url = url
+        self.websign = websign
+    
+    def run(self):
+        try:
+            # Fetch webpage content
+            html_content = self.fetch_webpage(self.url)
+            if not html_content:
+                raise Exception("Failed to fetch webpage content")
+            
+            # Extract tags using CSS selector
+            tags = self.extract_tags(html_content)
+            
+            self.finished.emit(tags)
+            
+        except Exception as e:
+            self.error.emit(str(e))
+    
+    def fetch_webpage(self, url, timeout=10, retries=3):
+        """Fetch webpage content with random User-Agent"""
+        headers = {
+            'User-Agent': get_random_user_agent(),
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive',
+        }
+        
+        for attempt in range(retries):
+            try:
+                response = requests.get(url, headers=headers, timeout=timeout)
+                response.raise_for_status()
+                return response.text
+            except requests.exceptions.RequestException as e:
+                if attempt < retries - 1:
+                    import time
+                    time.sleep(2)
+                else:
+                    return None
+    
+    def extract_tags(self, html_content):
+        """Extract tags from HTML using the specified CSS selector"""
+        soup = BeautifulSoup(html_content, 'html.parser')
+        
+        # Find all tag elements using the specified CSS selector
+        tag_elements = soup.select('span[data-type="tags"] a.btn.phone-tags-tag')
+        
+        # Extract text from each tag element
+        tags = []
+        for tag_element in tag_elements:
+            tag_text = tag_element.get_text(strip=True)
+            if tag_text:
+                tags.append(tag_text)
+        
+        return tags

@@ -11,8 +11,12 @@ class TableController:
         self.websign_tracker = {}
     
     def add_to_table(self, data):
-        """Add parsed data to table"""
-        author, title, group, show, magazine, origin, websign = data
+        """Add parsed data to table with tag support"""
+        if len(data) == 7:
+            author, title, group, show, magazine, origin, websign = data
+            tag = ""
+        else:
+            author, title, group, show, magazine, origin, websign, tag = data
 
         table = self.main_window.table
         
@@ -29,7 +33,7 @@ class TableController:
         else:
             websign_item.setText(websign)
         
-        # Set data in table - websign first now
+        # Set data in table - now 8 columns
         table.setItem(row_position, 0, websign_item)                 # websign
         table.setItem(row_position, 1, QTableWidgetItem(author))     # author
         table.setItem(row_position, 2, QTableWidgetItem(title))      # title
@@ -37,6 +41,7 @@ class TableController:
         table.setItem(row_position, 4, QTableWidgetItem(show))       # show
         table.setItem(row_position, 5, QTableWidgetItem(magazine))   # magazine
         table.setItem(row_position, 6, QTableWidgetItem(origin))     # origin
+        table.setItem(row_position, 7, QTableWidgetItem(tag))        # tag
 
         if websign not in self.websign_tracker:
             self.websign_tracker[websign] = []
@@ -83,7 +88,7 @@ class TableController:
         # Get column indices
         column_mapping = {
             'websign': 0, 'author': 1, 'title': 2, 'group': 3,
-            'show': 4, 'magazine': 5, 'origin': 6
+            'show': 4, 'magazine': 5, 'origin': 6, 'tag': 7
         }
         
         col1_index = column_mapping[options['condition1']['column']]
@@ -198,7 +203,7 @@ class TableController:
         # Get column indices
         column_mapping = {
             'websign': 0, 'author': 1, 'title': 2, 'group': 3,
-            'show': 4, 'magazine': 5, 'origin': 6
+            'show': 4, 'magazine': 5, 'origin': 6, 'tag': 7
         }
         
         col1_index = column_mapping[options['condition1']['column']]

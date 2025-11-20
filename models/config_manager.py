@@ -123,16 +123,16 @@ class ConfigManager:
     def get_column_config(self):
         """Get column configuration"""
         try:
-            visible = self.config.get('ColumnConfig', 'visible', fallback='1,1,1,1,1,1,1')
-            order = self.config.get('ColumnConfig', 'order', fallback='0,1,2,3,4,5,6')
+            visible = self.config.get('ColumnConfig', 'visible', fallback='1,1,1,1,1,1,1,1')
+            order = self.config.get('ColumnConfig', 'order', fallback='0,1,2,3,4,5,6,7')
             return {
                 'visible': [x == '1' for x in visible.split(',')],
                 'order': [int(x) for x in order.split(',')]
             }
         except:
             return {
-                'visible': [True, True, True, True, True, True, True],
-                'order': [0, 1, 2, 3, 4, 5, 6]
+                'visible': [True, True, True, True, True, True, True, True],
+                'order': [0, 1, 2, 3, 4, 5, 6, 7]
             }
 
     def set_column_config(self, visible, order):
