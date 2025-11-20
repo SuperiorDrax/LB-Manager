@@ -1,3 +1,7 @@
+# Test
+test*
+batch*
+
 # Python
 __pycache__
 .py[cod]
