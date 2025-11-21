@@ -17,6 +17,10 @@ class WebController:
         self.jm_website_value = self.config_manager.get_jm_website()
         self.dist_website_value = self.config_manager.get_dist_website()
         self.lib_path_value = self.config_manager.get_lib_path()
+
+        # Cover image cache
+        self.cover_cache = {}
+        self.max_cache_size = 100
     
     def show_web_setting_dialog(self):
         """Show web setting configuration dialog"""
@@ -293,6 +297,54 @@ class WebController:
         cancel_button.clicked.connect(dialog.reject)
         
         dialog.exec()
+
+    def get_cover_image(self, websign):
+        """Get cover image for websign"""
+        try:
+            # Check cache first
+            cache_key = str(websign)
+            if cache_key in self.cover_cache:
+                return self.cover_cache[cache_key]
+            
+            # Find ZIP file path
+            zip_path = self.find_zip_file_by_websign(websign)
+            if not zip_path:
+                return None
+            
+            # Extract cover image
+            from models.zip_image_manager import ZipImageManager
+            zip_manager = ZipImageManager()
+            cover_pixmap = zip_manager.extract_cover_image(zip_path)
+            
+            if cover_pixmap:
+                # Add to cache (with basic cache management)
+                if len(self.cover_cache) >= self.max_cache_size:
+                    # Remove oldest entry (simple FIFO)
+                    oldest_key = next(iter(self.cover_cache))
+                    del self.cover_cache[oldest_key]
+                
+                self.cover_cache[cache_key] = cover_pixmap
+            
+            return cover_pixmap
+            
+        except Exception as e:
+            print(f"Error getting cover image for {websign}: {e}")
+            return None
+
+    def find_zip_file_by_websign(self, websign):
+        """Find ZIP file path by websign number"""
+        lib_path = self.config_manager.get_lib_path()
+        if not lib_path or not os.path.exists(lib_path):
+            return None
+        
+        # Search for ZIP file with websign as filename
+        zip_filename = f"{websign}.zip"
+        
+        for root, dirs, files in os.walk(lib_path):
+            if zip_filename in files:
+                return os.path.join(root, zip_filename)
+        
+        return None
 
     def view_online(self, row):
         """Open selected row data in web browser using JM website and websign"""

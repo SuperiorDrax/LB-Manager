@@ -4,8 +4,8 @@ import io
 import logging
 from typing import List, Optional, Tuple
 from PIL import Image
-from PyQt6.QtCore import QObject, pyqtSignal, QTimer
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtCore import QObject, pyqtSignal, QTimer, Qt
+from PyQt6.QtGui import QPixmap, QImage
 
 class ZipImageManager(QObject):
     """
@@ -530,3 +530,41 @@ class ZipImageManager(QObject):
             import traceback
             traceback.print_exc()
             return False
+
+    def extract_cover_image(self, zip_path, size=(150, 200)):
+        """Extract first image from ZIP as cover thumbnail"""
+        try:
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                # Get image files sorted by name
+                image_files = [f for f in zip_ref.namelist() 
+                             if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.gif'))]
+                
+                if not image_files:
+                    return None
+                
+                # Get first image file
+                first_image = sorted(image_files)[0]
+                
+                # Read and resize image
+                with zip_ref.open(first_image) as image_file:
+                    image_data = image_file.read()
+                    
+                # Create QPixmap from image data
+                image = QImage()
+                image.loadFromData(image_data)
+                
+                # Scale image to thumbnail size while keeping aspect ratio
+                pixmap = QPixmap.fromImage(image)
+                scaled_pixmap = pixmap.scaled(size[0], size[1], 
+                                            Qt.AspectRatioMode.KeepAspectRatio,
+                                            Qt.TransformationMode.SmoothTransformation)
+                
+                return scaled_pixmap
+                
+        except Exception as e:
+            print(f"Error extracting cover from {zip_path}: {e}")
+            return None
+    
+    def get_cover_cache_key(self, zip_path):
+        """Generate cache key for cover image"""
+        return f"cover_{zip_path}"
