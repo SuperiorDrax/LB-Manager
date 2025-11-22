@@ -1,10 +1,14 @@
 from PyQt6.QtWidgets import QTableWidgetItem, QMessageBox
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QObject, pyqtSignal
 from PyQt6.QtGui import QColor, QBrush
 import re
 
-class TableController:
+class TableController(QObject):
+    data_added = pyqtSignal()
+    data_removed = pyqtSignal()
+
     def __init__(self, main_window):
+        super().__init__()
         self.main_window = main_window
         self.current_search_row = 0
         self.data = []
@@ -56,6 +60,8 @@ class TableController:
 
         if len(self.websign_tracker[websign]) > 1:
             self.highlight_duplicate_rows(websign)
+        
+        self.data_added.emit()
     
     def search_next(self, options):
         """Search with multiple conditions"""
@@ -350,11 +356,11 @@ class TableController:
     def get_read_status_display(self, status):
         """Convert status to display text"""
         status_map = {
-            "unread": "未读",
-            "reading": "阅读中", 
-            "completed": "已读完"
+            "unread": "Unread",
+            "reading": "Reading", 
+            "completed": "Completed"
         }
-        return status_map.get(status, "未读")
+        return status_map.get(status, "Unread")
 
     def apply_read_status_style(self, item, status):
         """Apply styling based on read status"""

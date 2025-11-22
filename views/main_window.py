@@ -9,11 +9,9 @@ from controllers.state_manager import StateManager
 from controllers.web_controller import WebController
 from controllers.table_visual_manager import TableVisualManager
 from views.enhanced_table import EnhancedTableWidget
+from views.sidebar import Sidebar
 import os
 import re
-import requests
-from bs4 import BeautifulSoup
-from utils.user_agents import get_random_user_agent
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -42,21 +40,37 @@ class MainWindow(QMainWindow):
         
         # Restore window state (may override default size)
         self.state_manager.restore_window_state()
+
+        # Initialize sidebar
+        self.sidebar = Sidebar(self)
         
         self.init_ui()
 
         self.table_controller.rebuild_websign_tracker()
+        self.table_controller.data_added.connect(self.update_sidebar_counts)
     
     def init_ui(self):
+        """Initialize UI with sidebar and menu bar"""
+        # Create menu bar first
+        self.create_menu_bar()
+
         # Create central widget
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        
-        # Create menu bar
-        self.create_menu_bar()
-        
-        # Main layout
-        layout = QVBoxLayout()
+
+        # Create main horizontal layout
+        main_layout = QHBoxLayout()
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # Add sidebar
+        main_layout.addWidget(self.sidebar)
+
+        # Create right side container for table and buttons
+        right_container = QWidget()
+        right_layout = QVBoxLayout()
+        right_layout.setContentsMargins(10, 10, 10, 10)
+        right_layout.setSpacing(10)
         
         # Create table using enhanced version
         self.table = EnhancedTableWidget()
@@ -83,7 +97,10 @@ class MainWindow(QMainWindow):
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_context_menu)
-        
+
+        # Add table and buttons (existing code)
+        right_layout.addWidget(self.table)
+
         # Create buttons
         button_layout = QHBoxLayout()
         self.insert_button = QPushButton("Insert")
@@ -94,12 +111,12 @@ class MainWindow(QMainWindow):
         button_layout.addWidget(self.insert_button)
         button_layout.addWidget(self.search_button)
         button_layout.addWidget(self.clear_button)
+        right_layout.addLayout(button_layout)
         
-        # Add widgets to layout
-        layout.addWidget(self.table)
-        layout.addLayout(button_layout)
+        right_container.setLayout(right_layout)
+        main_layout.addWidget(right_container)
         
-        central_widget.setLayout(layout)
+        central_widget.setLayout(main_layout)
 
         # Enable sorting and column dragging
         self.table.setSortingEnabled(True)
@@ -121,6 +138,10 @@ class MainWindow(QMainWindow):
         self.insert_button.clicked.connect(self.show_insert_dialog)
         self.search_button.clicked.connect(self.show_search_dialog)
         self.clear_button.clicked.connect(self.clear_table)
+
+        # Connect sidebar signals
+        self.sidebar.status_filter_changed.connect(self.apply_status_filter)
+        self.sidebar.filter_reset.connect(self.reset_table_filter)
 
         # Install event filter
         self.table.viewport().installEventFilter(self)
@@ -276,6 +297,7 @@ class MainWindow(QMainWindow):
             self.table_controller.websign_tracker.clear()
             # Clear sorting state when table is cleared
             self.table.clear_all_sorting()
+            self.update_sidebar_counts()
     
     def fetch_zip_numbers(self, lib_path):
         """Recursively scan directory and extract integers from ZIP filenames"""
@@ -378,19 +400,53 @@ class MainWindow(QMainWindow):
                 read_status_item.setData(Qt.ItemDataRole.UserRole, status)
                 read_status_item.setText(self.table_controller.get_read_status_display(status))
                 self.table_controller.apply_read_status_style(read_status_item, status)
-                
-                # Auto-update progress based on status
-                progress_item = self.table.item(row, 9)
-                if progress_item:
-                    if status == "unread":
-                        self.table_controller.update_progress(row, 0)
-                    elif status == "completed":
-                        self.table_controller.update_progress(row, 100)
-                    # "reading" status doesn't change progress automatically
-                        
+                self.update_sidebar_counts()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to update read status: {str(e)}")
 
     def update_progress(self, row, progress):
         """Update progress for specified row"""
         self.table_controller.update_progress(row, progress)
+
+    def apply_status_filter(self, status):
+        """Apply status filter to table"""
+        if status == "all":
+            self.reset_table_filter()
+            return
+        
+        for row in range(self.table.rowCount()):
+            read_status_item = self.table.item(row, 8)
+            if read_status_item:
+                actual_status = read_status_item.data(Qt.ItemDataRole.UserRole)
+                should_show = actual_status == status
+                self.table.setRowHidden(row, not should_show)
+    
+    def reset_table_filter(self):
+        """Reset table filter to show all rows"""
+        for row in range(self.table.rowCount()):
+            self.table.setRowHidden(row, False)
+    
+    def update_sidebar_counts(self):
+        """Update sidebar with current row counts"""
+        counts = {
+            "all": self.table.rowCount(),
+            "unread": 0,
+            "reading": 0,
+            "completed": 0
+        }
+        
+        # Count all rows by their actual status, regardless of current filter
+        for row in range(self.table.rowCount()):
+            read_status_item = self.table.item(row, 8)
+            if read_status_item:
+                status = read_status_item.data(Qt.ItemDataRole.UserRole)
+                if status in counts:
+                    counts[status] += 1
+        
+        # Update sidebar with actual counts
+        self.sidebar.update_status_counts(counts)
+
+    def add_data_to_table(self, data):
+        """Add data to table and update sidebar counts"""
+        self.table_controller.add_to_table(data)
+        self.update_sidebar_counts()

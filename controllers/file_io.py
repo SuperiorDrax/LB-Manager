@@ -66,8 +66,21 @@ class FileIO:
                     magazine = str(row_data.get('magazine', ''))
                     origin = str(row_data.get('origin', ''))
                     tag = str(row_data.get('tag', ''))
-                    read_status = row_data.get('read_status', 'unread')
+                    read_status = str(row_data.get('read_status', 'unread')).strip().lower()
                     progress = row_data.get('progress', 0)
+
+                    # Handle read_status
+                    if read_status not in ['unread', 'reading', 'completed']:
+                        read_status = 'unread'
+
+                    # Handle progress
+                    if isinstance(progress, str):
+                        progress = progress.replace('%', '')
+                    try:
+                        progress = int(progress)
+                        progress = max(0, min(100, progress))
+                    except (ValueError, TypeError):
+                        progress = 0
                     
                     # Validate required fields
                     if not websign or not author or not title:
@@ -80,6 +93,9 @@ class FileIO:
                     
                 except Exception as e:
                     error_rows.append((index + 1, str(e)))
+            
+            # Update count after importing
+            self.main_window.update_sidebar_counts()
             
             # Show import summary
             if error_rows:
@@ -132,6 +148,29 @@ class FileIO:
                     read_status = str(row['read_status']) if 'read_status' in df.columns and pd.notna(row['read_status']) else "unread"
                     progress = int(row['progress']) if 'progress' in df.columns and pd.notna(row['progress']) else 0
                     
+                    # Handle read_status
+                    read_status = "unread"
+                    if 'read_status' in df.columns and pd.notna(row['read_status']):
+                        status_value = str(row['read_status']).strip().lower()
+                        status_map = {
+                            'unread': 'unread',
+                            'reading': 'reading',
+                            'completed': 'completed',
+                        }
+                        read_status = status_map.get(status_value, "unread")
+                    
+                    # Handle progress
+                    progress = 0
+                    if 'progress' in df.columns and pd.notna(row['progress']):
+                        try:
+                            progress_val = row['progress']
+                            if isinstance(progress_val, str):
+                                progress_val = progress_val.replace('%', '')
+                            progress = int(float(progress_val))
+                            progress = max(0, min(100, progress))
+                        except (ValueError, TypeError):
+                            progress = 0
+
                     # Validate required fields
                     if not websign or not author or not title:
                         error_rows.append((index + 2, f"Missing required fields: websign='{websign}', author='{author}', title='{title}'"))
@@ -143,6 +182,9 @@ class FileIO:
                     
                 except Exception as e:
                     error_rows.append((index + 2, str(e)))
+            
+            # Update count after importing
+            self.main_window.update_sidebar_counts()
             
             # Show import summary
             if error_rows:
