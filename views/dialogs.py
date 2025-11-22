@@ -101,7 +101,7 @@ class InsertDialog(QDialog):
             QMessageBox.critical(self, "Fetch Error", f"Failed to start fetch: {str(e)}")
     
     def on_fetch_finished(self, result_data):
-        """Handle successful data fetch"""
+        """Handle successful data fetch with error checking"""
         # Ensure progress dialog is closed
         if hasattr(self, 'progress_dialog'):
             self.progress_dialog.close()
@@ -110,22 +110,28 @@ class InsertDialog(QDialog):
         self.fetch_button.setEnabled(True)
         self.fetch_button.setText("Fetch")
         
-        if result_data and 'extracted_texts' in result_data:
-            # Use the first extracted text and prepend JM number
-            jm_number = self.jm_input.text().strip()
-            fetched_text = result_data['extracted_texts'][0]
-            combined_text = f"{jm_number} {fetched_text}"
-            self.input_field.setText(combined_text)
-            
-            # Fill tags if available
-            if 'tags' in result_data and result_data['tags']:
-                tag_text = ", ".join(result_data['tags'])
-                self.tag_input.setText(tag_text)
-                QMessageBox.information(self, "Success", "Data and tags fetched successfully!")
-            else:
-                QMessageBox.information(self, "Success", "Data fetched successfully! (No tags found)")
+        if result_data and 'extracted_texts' in result_data and result_data['extracted_texts']:
+            try:
+                # Use the first extracted text and prepend JM number
+                jm_number = self.jm_input.text().strip()
+                fetched_text = result_data['extracted_texts'][0]
+                combined_text = f"{jm_number} {fetched_text}"
+                self.input_field.setText(combined_text)
+                
+                # Fill tags if available
+                if 'tags' in result_data and result_data['tags']:
+                    tag_text = ", ".join(result_data['tags'])
+                    self.tag_input.setText(tag_text)
+                    QMessageBox.information(self, "Success", "Data and tags fetched successfully!")
+                else:
+                    QMessageBox.information(self, "Success", "Data fetched successfully! (No tags found)")
+                    
+            except (IndexError, KeyError) as e:
+                QMessageBox.warning(self, "Fetch Error", 
+                                "Failed to extract data from the webpage. The website structure may have changed.")
         else:
-            QMessageBox.warning(self, "No Data", "Could not extract data from the webpage.")
+            QMessageBox.warning(self, "No Data", 
+                            "Could not extract data from the webpage. Please check the JM number and try again.")
     
     def on_fetch_error(self, error_msg):
         """Handle fetch error"""

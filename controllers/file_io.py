@@ -65,7 +65,9 @@ class FileIO:
                     show = str(row_data.get('show', ''))
                     magazine = str(row_data.get('magazine', ''))
                     origin = str(row_data.get('origin', ''))
-                    tag = str(row_data.get('tag', ''))  # 新增tag字段
+                    tag = str(row_data.get('tag', ''))
+                    read_status = row_data.get('read_status', 'unread')
+                    progress = row_data.get('progress', 0)
                     
                     # Validate required fields
                     if not websign or not author or not title:
@@ -73,7 +75,7 @@ class FileIO:
                         continue
                     
                     # Add to table with tag
-                    self.main_window.table_controller.add_to_table((author, title, group, show, magazine, origin, websign, tag))
+                    self.main_window.table_controller.add_to_table((author, title, group, show, magazine, origin, websign, tag, read_status, progress))
                     success_count += 1
                     
                 except Exception as e:
@@ -118,7 +120,7 @@ class FileIO:
             for index, row in df.iterrows():
                 try:
                     # Convert row to tuple format expected by table controller
-                    # Order: author, title, group, show, magazine, origin, websign, tag
+                    # Order: author, title, group, show, magazine, origin, websign, tag, read_status, progress
                     websign = str(row['websign']) if pd.notna(row['websign']) else ""
                     author = str(row['author']) if pd.notna(row['author']) else ""
                     title = str(row['title']) if pd.notna(row['title']) else ""
@@ -127,6 +129,8 @@ class FileIO:
                     magazine = str(row['magazine']) if 'magazine' in df.columns and pd.notna(row['magazine']) else ""
                     origin = str(row['origin']) if 'origin' in df.columns and pd.notna(row['origin']) else ""
                     tag = str(row['tag']) if 'tag' in df.columns and pd.notna(row['tag']) else ""
+                    read_status = str(row['read_status']) if 'read_status' in df.columns and pd.notna(row['read_status']) else "unread"
+                    progress = int(row['progress']) if 'progress' in df.columns and pd.notna(row['progress']) else 0
                     
                     # Validate required fields
                     if not websign or not author or not title:
@@ -134,7 +138,7 @@ class FileIO:
                         continue
                     
                     # Add to table with tag
-                    self.main_window.table_controller.add_to_table((author, title, group, show, magazine, origin, websign, tag))
+                    self.main_window.table_controller.add_to_table((author, title, group, show, magazine, origin, websign, tag, read_status, progress))
                     success_count += 1
                     
                 except Exception as e:
@@ -258,7 +262,7 @@ class FileIO:
             data = {
                 "version": 1,
                 "format": "data_table",
-                "columns": ['websign', 'author', 'title', 'group', 'show', 'magazine', 'origin', 'tag'],  # 添加tag
+                "columns": ['websign', 'author', 'title', 'group', 'show', 'magazine', 'origin', 'tag', 'read_status', 'progress'],
                 "data": []
             }
             
@@ -273,6 +277,11 @@ class FileIO:
                             if not websign_value:
                                 websign_value = item.text()
                             row_data[col_name] = websign_value
+                        elif col == 9:  # progress column
+                            progress_value = item.data(Qt.ItemDataRole.UserRole)
+                            if progress_value is None:
+                                progress_value = 0
+                            row_data[col_name] = progress_value
                         else:
                             row_data[col_name] = item.text()
                     else:
@@ -295,7 +304,7 @@ class FileIO:
         try:
             # Prepare data for DataFrame
             data = []
-            column_headers = ['websign', 'author', 'title', 'group', 'show', 'magazine', 'origin', 'tag']
+            column_headers = ['websign', 'author', 'title', 'group', 'show', 'magazine', 'origin', 'tag', 'read_status', 'progress']
             
             for row in range(self.main_window.table.rowCount()):
                 row_data = []
@@ -308,6 +317,11 @@ class FileIO:
                             if not websign_value:
                                 websign_value = item.text()
                             row_data.append(websign_value)
+                        elif col == 9:  # progress column
+                            progress_value = item.data(Qt.ItemDataRole.UserRole)
+                            if progress_value is None:
+                                progress_value = 0
+                            row_data.append(progress_value)
                         else:
                             row_data.append(item.text())
                     else:

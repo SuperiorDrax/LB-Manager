@@ -45,22 +45,29 @@ class EnhancedTableWidget(QTableWidget):
         self.horizontalHeader().sectionClicked.connect(self.on_header_clicked)
 
     def mouseMoveEvent(self, event):
-        """Handle mouse move for cover hover"""
-        # Get row under cursor
+        """Handle mouse move for cover hover - only trigger on title column"""
+        # Get row and column under cursor
         row = self.rowAt(event.pos().y())
+        column = self.columnAt(event.pos().x())
         
-        if row != self.last_hover_row:
-            # Hide tooltip if moved to different row
+        # Only trigger cover tooltip when hovering over title column (column 2)
+        if column == 2:  # title column
+            if row != self.last_hover_row:
+                # Reset timer if moved to different row
+                self.hover_timer.stop()
+                self.last_hover_row = row
+                
+                if row >= 0:
+                    # Start timer for hover delay
+                    self.hover_timer.start(self.hover_delay)
+        else:
+            # Not hovering over title column, hide tooltip and reset
             self.cover_tooltip.hide()
             self.hover_timer.stop()
-            self.last_hover_row = row
-            
-            if row >= 0:
-                # Start timer for hover delay
-                self.hover_timer.start(self.hover_delay)
+            self.last_hover_row = -1
         
         super().mouseMoveEvent(event)
-    
+
     def leaveEvent(self, event):
         """Handle mouse leave table"""
         self.cover_tooltip.hide()

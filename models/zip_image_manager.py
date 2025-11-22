@@ -537,7 +537,7 @@ class ZipImageManager(QObject):
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 # Get image files sorted by name
                 image_files = [f for f in zip_ref.namelist() 
-                             if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.gif'))]
+                             if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp'))]
                 
                 if not image_files:
                     return None

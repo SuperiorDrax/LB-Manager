@@ -17,7 +17,9 @@ class TableVisualManager:
         context_menu = QMenu(self.main_window)
         
         # Add column visibility controls
-        column_names = ['websign', 'author', 'title', 'group', 'show', 'magazine', 'origin', 'tag']
+        column_names = [
+            'websign', 'author', 'title', 'group', 'show', 'magazine', 'origin', 'tag', 'read_status', 'progress'
+        ]
         
         for i, name in enumerate(column_names):
             action = QAction(name, self.main_window)

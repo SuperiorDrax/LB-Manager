@@ -60,9 +60,9 @@ class MainWindow(QMainWindow):
         
         # Create table using enhanced version
         self.table = EnhancedTableWidget()
-        self.table.setColumnCount(8)
+        self.table.setColumnCount(10)
         self.table.setHorizontalHeaderLabels([
-            'websign', 'author', 'title', 'group', 'show', 'magazine', 'origin', 'tag'
+            'websign', 'author', 'title', 'group', 'show', 'magazine', 'origin', 'tag', 'read_status', 'progress'
         ])
         
         # Set column widths
@@ -74,6 +74,8 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(5, 120)
         self.table.setColumnWidth(6, 120)
         self.table.setColumnWidth(7, 150)
+        self.table.setColumnWidth(8, 80)
+        self.table.setColumnWidth(9, 80)
         
         # Enable other table features
         self.table.setSortingEnabled(True)
@@ -119,6 +121,12 @@ class MainWindow(QMainWindow):
         self.insert_button.clicked.connect(self.show_insert_dialog)
         self.search_button.clicked.connect(self.show_search_dialog)
         self.clear_button.clicked.connect(self.clear_table)
+
+        # Install event filter
+        self.table.viewport().installEventFilter(self)
+        
+        # Remove original context menu policy, use event filter instead
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
     
     def create_menu_bar(self):
         menu_bar = self.menuBar()
@@ -153,8 +161,28 @@ class MainWindow(QMainWindow):
         """Show about information"""
         QMessageBox.about(self, "About", "Author: Deepseek")
 
+    def eventFilter(self, obj, event):
+        """Event filter to handle right-click menu duplicate trigger issue"""
+        if obj is self.table.viewport() and event.type() == event.Type.ContextMenu:
+            # Handle right-click menu event
+            return self.handle_context_menu_event(event)
+        return super().eventFilter(obj, event)
+
+    def handle_context_menu_event(self, event):
+        """Handle right-click menu event"""
+        # Get clicked row
+        row = self.table.rowAt(event.pos().y())
+        if row < 0:
+            return False
+            
+        # Use original show_context_menu method
+        self.show_context_menu(event.pos())
+        
+        # Mark event as handled to prevent default behavior
+        return True
+
     def show_context_menu(self, position):
-        """Show right-click context menu"""
+        """Show right-click context menu with read status options"""
         # Get clicked row
         row = self.table.rowAt(position.y())
         if row < 0:
@@ -168,13 +196,37 @@ class MainWindow(QMainWindow):
         update_tag_action = context_menu.addAction("Update Tag")
         copy_action = context_menu.addAction("Copy to clipboard")
         delete_action = context_menu.addAction("Delete")
+
+        # Add read status submenu
+        read_status_menu = context_menu.addMenu("Mark as")
+        mark_unread_action = read_status_menu.addAction("Unread")
+        mark_reading_action = read_status_menu.addAction("Reading")
+        mark_completed_action = read_status_menu.addAction("Completed")
         
-        # Connect signals
+        # Add progress submenu
+        progress_menu = context_menu.addMenu("Set Progress")
+        progress_0_action = progress_menu.addAction("0%")
+        progress_25_action = progress_menu.addAction("25%")
+        progress_50_action = progress_menu.addAction("50%")
+        progress_75_action = progress_menu.addAction("75%")
+        progress_100_action = progress_menu.addAction("100%")
+        
+        # Connect Signals
         copy_action.triggered.connect(lambda: self.visual_manager.copy_row_to_clipboard(row))
         view_online_action.triggered.connect(lambda: self.web_controller.view_online(row))
         view_zip_action.triggered.connect(lambda: self.web_controller.view_zip_images(row))
         delete_action.triggered.connect(lambda: self.visual_manager.delete_rows([row]))
         update_tag_action.triggered.connect(lambda: self.web_controller.update_tag_for_row(row))
+
+        mark_unread_action.triggered.connect(lambda: self.update_read_status(row, "unread"))
+        mark_reading_action.triggered.connect(lambda: self.update_read_status(row, "reading"))
+        mark_completed_action.triggered.connect(lambda: self.update_read_status(row, "completed"))
+        
+        progress_0_action.triggered.connect(lambda: self.update_progress(row, 0))
+        progress_25_action.triggered.connect(lambda: self.update_progress(row, 25))
+        progress_50_action.triggered.connect(lambda: self.update_progress(row, 50))
+        progress_75_action.triggered.connect(lambda: self.update_progress(row, 75))
+        progress_100_action.triggered.connect(lambda: self.update_progress(row, 100))
         
         # Show menu
         context_menu.exec(self.table.viewport().mapToGlobal(position))
@@ -191,7 +243,7 @@ class MainWindow(QMainWindow):
                 parsed_data = DataParser.parse_text(text)
                 if parsed_data is not None:
                     data_list = list(parsed_data)
-                    data_list[-1] = tag_text
+                    data_list[7] = tag_text
                     self.table_controller.add_to_table(tuple(data_list))
     
     def show_search_dialog(self):
@@ -317,3 +369,28 @@ class MainWindow(QMainWindow):
             event.accept()
         else:
             super().keyPressEvent(event)
+    
+    def update_read_status(self, row, status):
+        """Update read status for specified row"""
+        try:
+            read_status_item = self.table.item(row, 8)
+            if read_status_item:
+                read_status_item.setData(Qt.ItemDataRole.UserRole, status)
+                read_status_item.setText(self.table_controller.get_read_status_display(status))
+                self.table_controller.apply_read_status_style(read_status_item, status)
+                
+                # Auto-update progress based on status
+                progress_item = self.table.item(row, 9)
+                if progress_item:
+                    if status == "unread":
+                        self.table_controller.update_progress(row, 0)
+                    elif status == "completed":
+                        self.table_controller.update_progress(row, 100)
+                    # "reading" status doesn't change progress automatically
+                        
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to update read status: {str(e)}")
+
+    def update_progress(self, row, progress):
+        """Update progress for specified row"""
+        self.table_controller.update_progress(row, progress)

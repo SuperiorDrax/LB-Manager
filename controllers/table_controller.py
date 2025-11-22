@@ -12,11 +12,7 @@ class TableController:
     
     def add_to_table(self, data):
         """Add parsed data to table with tag support"""
-        if len(data) == 7:
-            author, title, group, show, magazine, origin, websign = data
-            tag = ""
-        else:
-            author, title, group, show, magazine, origin, websign, tag = data
+        author, title, group, show, magazine, origin, websign, tag, read_status, progress = data
 
         table = self.main_window.table
         
@@ -33,6 +29,15 @@ class TableController:
         else:
             websign_item.setText(websign)
         
+        # Create read status item
+        read_status_item = QTableWidgetItem(self.get_read_status_display(read_status))
+        read_status_item.setData(Qt.ItemDataRole.UserRole, read_status)
+        self.apply_read_status_style(read_status_item, read_status)
+        
+        # Create progress item
+        progress_item = QTableWidgetItem(f"{progress}%")
+        progress_item.setData(Qt.ItemDataRole.UserRole, progress)
+        
         # Set data in table - now 8 columns
         table.setItem(row_position, 0, websign_item)                 # websign
         table.setItem(row_position, 1, QTableWidgetItem(author))     # author
@@ -42,6 +47,8 @@ class TableController:
         table.setItem(row_position, 5, QTableWidgetItem(magazine))   # magazine
         table.setItem(row_position, 6, QTableWidgetItem(origin))     # origin
         table.setItem(row_position, 7, QTableWidgetItem(tag))        # tag
+        table.setItem(row_position, 8, read_status_item)             # read_status
+        table.setItem(row_position, 9, progress_item)                # progress
 
         if websign not in self.websign_tracker:
             self.websign_tracker[websign] = []
@@ -313,3 +320,50 @@ class TableController:
         """Update websign tracker and other data when row is removed"""
         # Rebuild the entire websign tracker since row indices change
         self.rebuild_websign_tracker()
+    
+    def update_progress(self, row, progress):
+        """Update progress for specified row"""
+        try:
+            progress_item = self.main_window.table.item(row, 9)
+            if progress_item:
+                progress = max(0, min(100, progress))  # Clamp between 0-100
+                progress_item.setText(f"{progress}%")
+                progress_item.setData(Qt.ItemDataRole.UserRole, progress)
+                
+                # Auto-update read status based on progress
+                read_status_item = self.main_window.table.item(row, 8)
+                if read_status_item:
+                    if progress == 0:
+                        new_status = "unread"
+                    elif progress == 100:
+                        new_status = "completed"
+                    else:
+                        new_status = "reading"
+                    
+                    read_status_item.setData(Qt.ItemDataRole.UserRole, new_status)
+                    read_status_item.setText(self.get_read_status_display(new_status))
+                    self.apply_read_status_style(read_status_item, new_status)
+                    
+        except Exception as e:
+            print(f"Error updating progress: {e}")
+    
+    def get_read_status_display(self, status):
+        """Convert status to display text"""
+        status_map = {
+            "unread": "未读",
+            "reading": "阅读中", 
+            "completed": "已读完"
+        }
+        return status_map.get(status, "未读")
+
+    def apply_read_status_style(self, item, status):
+        """Apply styling based on read status"""
+        if status == "completed":
+            item.setBackground(QColor(220, 255, 220))  # Light green
+            item.setForeground(QColor(0, 100, 0))      # Dark green text
+        elif status == "reading":
+            item.setBackground(QColor(255, 255, 200))  # Light yellow
+            item.setForeground(QColor(140, 100, 0))    # Dark yellow text
+        else:  # unread
+            item.setBackground(QColor(255, 220, 220))  # Light red
+            item.setForeground(QColor(100, 0, 0))      # Dark red text
