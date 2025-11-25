@@ -1,5 +1,6 @@
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPushButton
 from PyQt6.QtCore import Qt, pyqtSignal
+from views.tag_cloud import TagCloud
 
 class Sidebar(QWidget):
     """Sidebar for filtering and navigation"""
@@ -7,6 +8,7 @@ class Sidebar(QWidget):
     # Signals for filter changes
     status_filter_changed = pyqtSignal(str)  # Emits status: "all", "unread", "reading", "completed"
     filter_reset = pyqtSignal()
+    tag_filter_changed = pyqtSignal(list)
     
     def __init__(self, main_window):
         super().__init__()
@@ -40,12 +42,41 @@ class Sidebar(QWidget):
         
         # Add separator
         layout.addWidget(self.create_separator())
+
+        # Tag cloud section
+        self.tag_cloud = TagCloud(self.main_window)
+        layout.addWidget(self.tag_cloud)
+
+        # Add separator
+        layout.addWidget(self.create_separator())
+        
+        # Reset button
+        reset_btn = QPushButton("Reset Filters")
+        reset_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #95a5a6;
+                color: white;
+                border: none;
+                padding: 8px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #7f8c8d;
+            }
+        """)
+        reset_btn.clicked.connect(self.reset_filters)
+        layout.addWidget(reset_btn)
         
         # Add stretch to push content to top
         layout.addStretch()
         
         self.setLayout(layout)
-        self.setFixedWidth(250)
+        self.setFixedWidth(280)
+
+        # Connect tag cloud signals
+        self.tag_cloud.tag_clicked.connect(self.on_tag_clicked)
+        self.tag_cloud.clear_tags.connect(self.on_tags_cleared)
     
     def create_separator(self):
         """Create a horizontal separator line"""
@@ -96,10 +127,11 @@ class Sidebar(QWidget):
                 border: 1px solid #bdc3c7;
                 border-radius: 4px;
                 background-color: #ecf0f1;
+                color: #2c3e50;
             }
             QPushButton:checked {
                 background-color: #3498db;
-                color: white;
+                color: #2c3e50;
                 border: 1px solid #2980b9;
             }
             QPushButton:hover:!checked {
@@ -132,3 +164,24 @@ class Sidebar(QWidget):
         self.unread_btn.setText(f"Unread ({counts.get('unread', 0)})")
         self.reading_btn.setText(f"Reading ({counts.get('reading', 0)})")
         self.completed_btn.setText(f"Completed ({counts.get('completed', 0)})")
+
+    def on_tag_clicked(self, tag):
+        """Handle tag selection"""
+        selected_tags = self.tag_cloud.get_selected_tags()
+        self.tag_filter_changed.emit(selected_tags)
+
+    def on_tags_cleared(self):
+        """Handle tags cleared"""
+        self.tag_filter_changed.emit([])
+    
+    def reset_filters(self):
+        """Reset all filters to default"""
+        self.all_btn.setChecked(True)
+        for btn in [self.unread_btn, self.reading_btn, self.completed_btn]:
+            btn.setChecked(False)
+        self.tag_cloud.clear_selected_tags()
+        self.filter_reset.emit()
+    
+    def update_tag_cloud(self, tag_data):
+        """Update tag cloud with tag frequency data"""
+        self.tag_cloud.update_tags(tag_data)

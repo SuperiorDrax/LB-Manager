@@ -43,6 +43,7 @@ class MainWindow(QMainWindow):
 
         # Initialize sidebar
         self.sidebar = Sidebar(self)
+        self.sidebar.tag_filter_changed.connect(self.apply_tag_filter)
         
         self.init_ui()
 
@@ -427,7 +428,7 @@ class MainWindow(QMainWindow):
             self.table.setRowHidden(row, False)
     
     def update_sidebar_counts(self):
-        """Update sidebar with current row counts"""
+        """Update sidebar with current row counts and tag data"""
         counts = {
             "all": self.table.rowCount(),
             "unread": 0,
@@ -435,16 +436,70 @@ class MainWindow(QMainWindow):
             "completed": 0
         }
         
-        # Count all rows by their actual status, regardless of current filter
+        tag_frequency = {}
+        
+        # Count all rows by their actual status and collect tags
         for row in range(self.table.rowCount()):
             read_status_item = self.table.item(row, 8)
             if read_status_item:
                 status = read_status_item.data(Qt.ItemDataRole.UserRole)
                 if status in counts:
                     counts[status] += 1
+            
+            # Collect tags
+            tag_item = self.table.item(row, 7)  # tag column
+            if tag_item:
+                tag_text = tag_item.text()
+                if tag_text:
+                    # Split tags by comma and count each one
+                    tags = [tag.strip() for tag in tag_text.split(',') if tag.strip()]
+                    for tag in tags:
+                        tag_frequency[tag] = tag_frequency.get(tag, 0) + 1
         
-        # Update sidebar with actual counts
+        # Update sidebar with counts and tag data
         self.sidebar.update_status_counts(counts)
+        self.sidebar.update_tag_cloud(tag_frequency)
+
+    def apply_tag_filter(self, selected_tags):
+        """Apply tag filter to table"""
+        if not selected_tags:
+            # No tags selected, show all rows (respecting status filter)
+            current_status = self.get_current_status_filter()
+            self.apply_status_filter(current_status)
+            return
+        
+        for row in range(self.table.rowCount()):
+            tag_item = self.table.item(row, 7)  # tag column
+            should_show = False
+            
+            if tag_item:
+                tag_text = tag_item.text()
+                if tag_text:
+                    # Split tags by comma and check if any matches selected tags
+                    row_tags = [tag.strip() for tag in tag_text.split(',') if tag.strip()]
+                    should_show = any(tag in selected_tags for tag in row_tags)
+            
+            # Also respect current status filter
+            read_status_item = self.table.item(row, 8)
+            if read_status_item:
+                current_status = self.get_current_status_filter()
+                if current_status != "all":
+                    actual_status = read_status_item.data(Qt.ItemDataRole.UserRole)
+                    should_show = should_show and (actual_status == current_status)
+            
+            self.table.setRowHidden(row, not should_show)
+
+    def get_current_status_filter(self):
+        """Get currently selected status filter"""
+        if self.sidebar.all_btn.isChecked():
+            return "all"
+        elif self.sidebar.unread_btn.isChecked():
+            return "unread"
+        elif self.sidebar.reading_btn.isChecked():
+            return "reading"
+        elif self.sidebar.completed_btn.isChecked():
+            return "completed"
+        return "all"
 
     def add_data_to_table(self, data):
         """Add data to table and update sidebar counts"""
