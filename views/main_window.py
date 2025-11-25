@@ -25,7 +25,6 @@ class MainWindow(QMainWindow):
         self.data_parser = DataParser()
         self.file_io = FileIO(self)
         self.table_controller = TableController(self)
-
         self.state_manager = StateManager(self)
         self.web_controller = WebController(self)
         self.visual_manager = TableVisualManager(self)
@@ -49,6 +48,7 @@ class MainWindow(QMainWindow):
 
         self.table_controller.rebuild_websign_tracker()
         self.table_controller.data_added.connect(self.update_sidebar_counts)
+        self.table_controller.filter_state_changed.connect(self.on_filter_state_changed)
     
     def init_ui(self):
         """Initialize UI with sidebar and menu bar"""
@@ -102,17 +102,23 @@ class MainWindow(QMainWindow):
         # Add table and buttons (existing code)
         right_layout.addWidget(self.table)
 
+        # Connect double-click signal
+        self.table.doubleClicked.connect(self.on_table_double_click)
+
         # Create buttons
         button_layout = QHBoxLayout()
-        self.insert_button = QPushButton("Insert")
         self.search_button = QPushButton("Search")
         self.search_button.setToolTip("Search (Ctrl+F)")
         self.clear_button = QPushButton("Clear")
         
-        button_layout.addWidget(self.insert_button)
         button_layout.addWidget(self.search_button)
         button_layout.addWidget(self.clear_button)
+        button_layout.addStretch()  # Add stretch to push buttons to left
         right_layout.addLayout(button_layout)
+
+        # Add filter state tracking
+        self.is_filtered = False
+        self.original_row_visibility = [] # Store original row visibility state 
         
         right_container.setLayout(right_layout)
         main_layout.addWidget(right_container)
@@ -136,7 +142,6 @@ class MainWindow(QMainWindow):
         self.table.horizontalHeader().sectionMoved.connect(self.state_manager.on_column_moved)
         
         # Connect signals
-        self.insert_button.clicked.connect(self.show_insert_dialog)
         self.search_button.clicked.connect(self.show_search_dialog)
         self.clear_button.clicked.connect(self.clear_table)
 
@@ -156,10 +161,13 @@ class MainWindow(QMainWindow):
         # File menu
         file_menu = menu_bar.addMenu("File")
         
+        insert_action = file_menu.addAction("Insert")
         import_action = file_menu.addAction("Import")
         save_action = file_menu.addAction("Save")
+        file_menu.addSeparator()
         exit_action = file_menu.addAction("Exit")
         
+        insert_action.triggered.connect(self.show_insert_dialog)
         import_action.triggered.connect(self.file_io.import_from_file)
         save_action.triggered.connect(self.file_io.save_to_file)
         exit_action.triggered.connect(self.close)
@@ -279,7 +287,22 @@ class MainWindow(QMainWindow):
         elif result == 2:  # Filter
             options = dialog.get_search_options()
             if options:
-                self.table_controller.filter_table(options)
+                self.table_controller.apply_search_filter(options)
+
+    def reset_search_filter(self):
+        """Reset search filter - called from button click"""
+        self.table_controller.reset_search_filter()
+
+    def update_search_button_behavior(self):
+        """Update search button connection based on filter state"""
+        self.search_button.clicked.disconnect()
+        
+        if self.table_controller.is_filtered:
+            self.search_button.setText(f"Show All ({self.table_controller.get_visible_row_count()} shown)")
+            self.search_button.clicked.connect(self.reset_search_filter)
+        else:
+            self.search_button.setText("Search")
+            self.search_button.clicked.connect(self.show_search_dialog)
     
     def search_next(self, column, search_text):
         self.table_controller.search_next(column, search_text)
@@ -296,8 +319,10 @@ class MainWindow(QMainWindow):
             self.table.setRowCount(0)
             self.data.clear()
             self.table_controller.websign_tracker.clear()
-            # Clear sorting state when table is cleared
             self.table.clear_all_sorting()
+            self.table_controller.is_filtered = False
+            self.table_controller.original_row_visibility = []
+            self.table_controller.filter_state_changed.emit(False)
             self.update_sidebar_counts()
     
     def fetch_zip_numbers(self, lib_path):
@@ -505,3 +530,24 @@ class MainWindow(QMainWindow):
         """Add data to table and update sidebar counts"""
         self.table_controller.add_to_table(data)
         self.update_sidebar_counts()
+
+    def on_filter_state_changed(self, is_filtered):
+        """Handle filter state change"""
+        self.update_sidebar_counts()
+        self.update_search_button_behavior()
+
+    def on_table_double_click(self, index):
+        """Handle table double-click to open image viewer"""
+        row = index.row()
+        if row >= 0 and row < self.table.rowCount():
+            # Show loading indicator
+            self.setCursor(Qt.CursorShape.WaitCursor)
+            
+            try:
+                # Call the same method as right-click "View" option
+                self.web_controller.view_zip_images(row)
+            except Exception as e:
+                QMessageBox.critical(self, "View Error", f"Failed to open viewer: {str(e)}")
+            finally:
+                # Restore cursor
+                self.setCursor(Qt.CursorShape.ArrowCursor)

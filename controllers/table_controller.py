@@ -6,13 +6,17 @@ import re
 class TableController(QObject):
     data_added = pyqtSignal()
     data_removed = pyqtSignal()
+    filter_state_changed = pyqtSignal(bool)
 
     def __init__(self, main_window):
         super().__init__()
         self.main_window = main_window
-        self.current_search_row = 0
-        self.data = []
         self.websign_tracker = {}
+        self.is_filtered = False
+        self.original_row_visibility = []
+
+        self.current_search_row = -1
+        self.last_search_options = None
     
     def add_to_table(self, data):
         """Add parsed data to table with tag support"""
@@ -62,9 +66,69 @@ class TableController(QObject):
             self.highlight_duplicate_rows(websign)
         
         self.data_added.emit()
+
+    def apply_search_filter(self, options):
+        """Apply search filter with undo capability"""
+        # Save current visibility state (if it's the first filter)
+        if not self.is_filtered:
+            self.save_current_visibility()
+        
+        # Apply filter
+        self.filter_table(options)
+        self.is_filtered = True
+        
+        # Emit state change signal
+        self.filter_state_changed.emit(True)
+        self.update_search_button_state()
+
+    def save_current_visibility(self):
+        """Save current row visibility state"""
+        self.original_row_visibility = []
+        for row in range(self.main_window.table.rowCount()):
+            self.original_row_visibility.append(not self.main_window.table.isRowHidden(row))
+
+    def reset_search_filter(self):
+        """Reset search filter to original state"""
+        if self.is_filtered and self.original_row_visibility:
+            # Restore original visibility state
+            for row, visible in enumerate(self.original_row_visibility):
+                self.main_window.table.setRowHidden(row, not visible)
+        
+        self.is_filtered = False
+        self.original_row_visibility = []
+        self.filter_state_changed.emit(False)
+        self.update_search_button_state()
+
+    def get_visible_row_count(self):
+        """Calculate visible row count"""
+        count = 0
+        for row in range(self.main_window.table.rowCount()):
+            if not self.main_window.table.isRowHidden(row):
+                count += 1
+        return count
+
+    def update_search_button_state(self):
+        """Update search button text and behavior based on filter state"""
+        search_button = self.main_window.search_button
+        
+        try:
+            search_button.clicked.disconnect()
+        except:
+            pass
+        
+        if self.is_filtered:
+            visible_count = self.get_visible_row_count()
+            search_button.setText(f"Show All ({visible_count} shown)")
+            search_button.clicked.connect(self.reset_search_filter)
+        else:
+            search_button.setText("Search")
+            search_button.clicked.connect(self.main_window.show_search_dialog)
     
     def search_next(self, options):
         """Search with multiple conditions"""
+        if not hasattr(self, 'current_search_row'):
+            self.current_search_row = -1
+
         if not options:
             return
         
@@ -181,7 +245,7 @@ class TableController(QObject):
             self.current_search_row = 0
 
     def filter_table(self, options):
-        """Filter table with multiple conditions"""
+        """Filter table with multiple conditions - hide rows instead of deleting"""
         if not options:
             return
         
@@ -223,43 +287,46 @@ class TableController(QObject):
         if 'condition2' in options:
             col2_index = column_mapping[options['condition2']['column']]
         
-        rows_to_remove = []
-        
-        # Find rows that don't match the conditions
-        for row in range(self.main_window.table.rowCount() - 1, -1, -1):
+        # Hide rows that don't match the conditions instead of deleting
+        visible_count = 0
+        for row in range(self.main_window.table.rowCount()):
             item1 = self.main_window.table.item(row, col1_index)
             if not item1:
-                rows_to_remove.append(row)
+                self.main_window.table.setRowHidden(row, True)
                 continue
             
             # Single condition
             if match_func2 is None:
-                if not match_func1(item1.text()):
-                    rows_to_remove.append(row)
+                if match_func1(item1.text()):
+                    self.main_window.table.setRowHidden(row, False)
+                    visible_count += 1
+                else:
+                    self.main_window.table.setRowHidden(row, True)
             # Multiple conditions
             else:
                 item2 = self.main_window.table.item(row, col2_index)
                 if not item2:
-                    rows_to_remove.append(row)
+                    self.main_window.table.setRowHidden(row, True)
                     continue
                 
                 condition1_matched = match_func1(item1.text())
                 condition2_matched = match_func2(item2.text())
                 
                 if options['logic'] == 'AND':
-                    if not (condition1_matched and condition2_matched):
-                        rows_to_remove.append(row)
+                    if condition1_matched and condition2_matched:
+                        self.main_window.table.setRowHidden(row, False)
+                        visible_count += 1
+                    else:
+                        self.main_window.table.setRowHidden(row, True)
                 else:  # OR logic
-                    if not (condition1_matched or condition2_matched):
-                        rows_to_remove.append(row)
+                    if condition1_matched or condition2_matched:
+                        self.main_window.table.setRowHidden(row, False)
+                        visible_count += 1
+                    else:
+                        self.main_window.table.setRowHidden(row, True)
         
-        if len(rows_to_remove) == self.main_window.table.rowCount():
+        if visible_count == 0:
             QMessageBox.warning(self.main_window, "Filter", "Cannot find the specified text.")
-            return
-        
-        # Remove rows that don't match
-        for row in rows_to_remove:
-            self.main_window.table.removeRow(row)
     
     def highlight_duplicate_rows(self, websign):
         """Highlight all rows with duplicate websign with light red background"""
