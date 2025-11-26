@@ -212,28 +212,32 @@ class MainWindow(QMainWindow):
         return True
 
     def show_context_menu(self, position):
-        """Show right-click context menu with read status options"""
-        # Get clicked row
-        row = self.table.rowAt(position.y())
-        if row < 0:
+        """Show right-click context menu for selected rows"""
+        selected_rows = self.get_selected_rows()
+        
+        if not selected_rows:
             return
             
         # Create context menu
         context_menu = QMenu(self)
         
+        # Always show these actions (work for both single and multiple)
         view_zip_action = context_menu.addAction("View")
         view_online_action = context_menu.addAction("View online")
         update_tag_action = context_menu.addAction("Update Tag")
-        copy_action = context_menu.addAction("Copy to clipboard")
-        delete_action = context_menu.addAction("Delete")
-
-        # Add read status submenu
+        
+        # Connect actions - they now handle both single and multiple rows
+        view_zip_action.triggered.connect(lambda: self.web_controller.view_zip_images(selected_rows))
+        view_online_action.triggered.connect(lambda: self.web_controller.view_online(selected_rows))
+        update_tag_action.triggered.connect(lambda: self.web_controller.update_tag_for_row(selected_rows))
+        
+        # Read status submenu
         read_status_menu = context_menu.addMenu("Mark as")
         mark_unread_action = read_status_menu.addAction("Unread")
         mark_reading_action = read_status_menu.addAction("Reading")
         mark_completed_action = read_status_menu.addAction("Completed")
         
-        # Add progress submenu
+        # Progress submenu
         progress_menu = context_menu.addMenu("Set Progress")
         progress_0_action = progress_menu.addAction("0%")
         progress_25_action = progress_menu.addAction("25%")
@@ -241,22 +245,22 @@ class MainWindow(QMainWindow):
         progress_75_action = progress_menu.addAction("75%")
         progress_100_action = progress_menu.addAction("100%")
         
-        # Connect Signals
-        copy_action.triggered.connect(lambda: self.visual_manager.copy_row_to_clipboard(row))
-        view_online_action.triggered.connect(lambda: self.web_controller.view_online(row))
-        view_zip_action.triggered.connect(lambda: self.web_controller.view_zip_images(row))
-        delete_action.triggered.connect(lambda: self.visual_manager.delete_rows([row]))
-        update_tag_action.triggered.connect(lambda: self.web_controller.update_tag_for_row(row))
-
-        mark_unread_action.triggered.connect(lambda: self.update_read_status(row, "unread"))
-        mark_reading_action.triggered.connect(lambda: self.update_read_status(row, "reading"))
-        mark_completed_action.triggered.connect(lambda: self.update_read_status(row, "completed"))
+        copy_action = context_menu.addAction("Copy to clipboard")
+        delete_action = context_menu.addAction("Delete")
         
-        progress_0_action.triggered.connect(lambda: self.update_progress(row, 0))
-        progress_25_action.triggered.connect(lambda: self.update_progress(row, 25))
-        progress_50_action.triggered.connect(lambda: self.update_progress(row, 50))
-        progress_75_action.triggered.connect(lambda: self.update_progress(row, 75))
-        progress_100_action.triggered.connect(lambda: self.update_progress(row, 100))
+        # Connect all actions
+        mark_unread_action.triggered.connect(lambda: self.table_controller.update_progress(selected_rows, 0))
+        mark_reading_action.triggered.connect(lambda: self.table_controller.update_progress(selected_rows, 50))  # Default reading progress
+        mark_completed_action.triggered.connect(lambda: self.table_controller.update_progress(selected_rows, 100))
+        
+        progress_0_action.triggered.connect(lambda: self.table_controller.update_progress(selected_rows, 0))
+        progress_25_action.triggered.connect(lambda: self.table_controller.update_progress(selected_rows, 25))
+        progress_50_action.triggered.connect(lambda: self.table_controller.update_progress(selected_rows, 50))
+        progress_75_action.triggered.connect(lambda: self.table_controller.update_progress(selected_rows, 75))
+        progress_100_action.triggered.connect(lambda: self.table_controller.update_progress(selected_rows, 100))
+        
+        copy_action.triggered.connect(lambda: self.visual_manager.copy_rows_to_clipboard(selected_rows))
+        delete_action.triggered.connect(lambda: self.visual_manager.delete_rows(selected_rows))
         
         # Show menu
         context_menu.exec(self.table.viewport().mapToGlobal(position))
@@ -551,3 +555,14 @@ class MainWindow(QMainWindow):
             finally:
                 # Restore cursor
                 self.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def get_selected_rows(self):
+        """Get all selected row indices"""
+        selected_ranges = self.table.selectedRanges()
+        selected_rows = set()
+        
+        for selection_range in selected_ranges:
+            for row in range(selection_range.topRow(), selection_range.bottomRow() + 1):
+                selected_rows.add(row)
+        
+        return sorted(list(selected_rows))

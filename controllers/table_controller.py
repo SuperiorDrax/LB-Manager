@@ -394,31 +394,35 @@ class TableController(QObject):
         # Rebuild the entire websign tracker since row indices change
         self.rebuild_websign_tracker()
     
-    def update_progress(self, row, progress):
-        """Update progress for specified row"""
-        try:
-            progress_item = self.main_window.table.item(row, 9)
-            if progress_item:
-                progress = max(0, min(100, progress))  # Clamp between 0-100
-                progress_item.setText(f"{progress}%")
-                progress_item.setData(Qt.ItemDataRole.UserRole, progress)
-                
-                # Auto-update read status based on progress
-                read_status_item = self.main_window.table.item(row, 8)
-                if read_status_item:
-                    if progress == 0:
-                        new_status = "unread"
-                    elif progress == 100:
-                        new_status = "completed"
-                    else:
-                        new_status = "reading"
+    def update_progress(self, rows, progress):
+        """Update progress for rows - supports both single row and multiple rows"""
+        if not isinstance(rows, list):
+            rows = [rows]  # Convert single row to list
+        
+        for row in rows:
+            try:
+                progress_item = self.main_window.table.item(row, 9)
+                if progress_item:
+                    progress = max(0, min(100, progress))
+                    progress_item.setText(f"{progress}%")
+                    progress_item.setData(Qt.ItemDataRole.UserRole, progress)
                     
-                    read_status_item.setData(Qt.ItemDataRole.UserRole, new_status)
-                    read_status_item.setText(self.get_read_status_display(new_status))
-                    self.apply_read_status_style(read_status_item, new_status)
-                    
-        except Exception as e:
-            print(f"Error updating progress: {e}")
+                    # Auto-update read status based on progress
+                    read_status_item = self.main_window.table.item(row, 8)
+                    if read_status_item:
+                        if progress == 0:
+                            new_status = "unread"
+                        elif progress == 100:
+                            new_status = "completed"
+                        else:
+                            new_status = "reading"
+                        
+                        read_status_item.setData(Qt.ItemDataRole.UserRole, new_status)
+                        read_status_item.setText(self.get_read_status_display(new_status))
+                        self.apply_read_status_style(read_status_item, new_status)
+                        
+            except Exception as e:
+                print(f"Error updating progress for row {row}: {e}")
     
     def get_read_status_display(self, status):
         """Convert status to display text"""

@@ -130,3 +130,23 @@ class TableVisualManager:
             
         except Exception as e:
             QMessageBox.critical(self.main_window, "Copy Error", f"Failed to copy data: {str(e)}")
+
+    def copy_rows_to_clipboard(self, rows):
+        """Copy multiple rows to clipboard"""
+        if not rows:
+            return
+        
+        # Sort rows to maintain order
+        rows.sort()
+        
+        clipboard_text = ""
+        for row in rows:
+            row_text = self.copy_row_to_clipboard(row, include_header=False)
+            clipboard_text += row_text + "\n"
+        
+        # Copy to clipboard
+        clipboard = QApplication.clipboard()
+        clipboard.setText(clipboard_text.strip())
+        
+        QMessageBox.information(self.main_window, "Copy", 
+                            f"Copied {len(rows)} rows to clipboard")

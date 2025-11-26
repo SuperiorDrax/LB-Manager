@@ -346,32 +346,46 @@ class WebController:
         
         return None
 
-    def view_online(self, row):
-        """Open selected row data in web browser using JM website and websign"""
-        try:
-            # Get websign from selected row (now column 0)
-            websign_item = self.main_window.table.item(row, 0)  # websign is now first column
-            if not websign_item or not websign_item.text():
-                QMessageBox.warning(self.main_window, "View Online", "No websign found in selected row.")
-                return
-            
-            websign = websign_item.text()
-            
-            # Use current website value (loaded from config)
-            website = self.jm_website_value
-            
-            # Construct URL
-            url = f"https://{website}/album/{websign}"
-            
-            # Open URL in default web browser
-            webbrowser.open(url)
-            
-            QMessageBox.information(self.main_window, "View Online", f"Opening URL in browser:\n{url}")
-            
-        except Exception as e:
-            QMessageBox.critical(self.main_window, "View Online Error", f"Failed to open URL: {str(e)}")
+    def view_online(self, rows):
+        """View rows online - supports both single row and multiple rows"""
+        if not isinstance(rows, list):
+            rows = [rows]  # Convert single row to list
+        
+        for row in rows:
+            try:
+                # Existing single row logic
+                websign_item = self.main_window.table.item(row, 0)
+                if not websign_item:
+                    continue
+                    
+                websign = websign_item.data(Qt.ItemDataRole.UserRole)
+                if not websign:
+                    websign = websign_item.text()
+                    
+                if not websign:
+                    continue
+                    
+                jm_website = self.config_manager.get_jm_website()
+                if not jm_website:
+                    QMessageBox.warning(self.main_window, "View Error", "JM website is not configured.")
+                    continue
+                    
+                url = f"https://{jm_website}/album/{websign}"
+                webbrowser.open(url)
+                
+            except Exception as e:
+                print(f"Error viewing online for row {row}: {e}")
 
-    def view_zip_images(self, row):
+    def view_zip_images(self, rows):
+        """View ZIP images for rows - supports both single row and multiple rows"""
+        if not isinstance(rows, list):
+            rows = [rows]  # Convert single row to list
+        
+        # For multiple rows, open the first one (or could implement multi-viewer)
+        if rows:
+            self._view_single_zip_image(rows[0])
+
+    def _view_single_zip_imag(self, row):
         """Complete ZIP image viewing process with delete option for missing files"""
         try:
             # 1. Get websign
@@ -415,74 +429,154 @@ class WebController:
             from views.image_viewer import open_zip_image_viewer
             viewer = open_zip_image_viewer(zip_path, self.main_window, current_slide_speed)
             
+            # 6. Connect progress tracking signals
+            self.setup_progress_tracking(viewer, row, zip_path)
+            
         except Exception as e:
             QMessageBox.critical(self.main_window, "View Error", f"Failed to view ZIP images: {str(e)}")
-    
-    def update_tag_for_row(self, row):
-        """Update tag for specified row by fetching from website"""
+
+    def setup_progress_tracking(self, viewer, row, zip_path):
+        """Setup automatic progress tracking for the image viewer"""
+        # Store the row index for progress updates
+        viewer.row_index = row
+        
+        # Monkey patch the key methods to include progress updates
+        original_next_image = viewer.next_image
+        original_previous_image = viewer.previous_image
+        original_jump_to_image = viewer.jump_to_image
+        original_close_event = viewer.closeEvent
+        original_display_current_image = viewer.display_current_image
+        
+        def patched_next_image():
+            result = original_next_image()
+            self.update_viewer_progress(viewer)
+            return result
+        
+        def patched_previous_image():
+            result = original_previous_image()
+            self.update_viewer_progress(viewer)
+            return result
+        
+        def patched_jump_to_image(target_index):
+            result = original_jump_to_image(target_index)
+            self.update_viewer_progress(viewer)
+            return result
+        
+        def patched_display_current_image():
+            result = original_display_current_image()
+            self.update_viewer_progress(viewer)
+            return result
+        
+        def patched_close_event(event):
+            # Save final progress before closing
+            self.update_viewer_progress(viewer, is_final=True)
+            original_close_event(event)
+        
+        # Apply the patches
+        viewer.next_image = patched_next_image
+        viewer.previous_image = patched_previous_image
+        viewer.jump_to_image = patched_jump_to_image
+        viewer.display_current_image = patched_display_current_image
+        viewer.closeEvent = patched_close_event
+        
+        # Initial progress update
+        self.update_viewer_progress(viewer)
+
+    def update_viewer_progress(self, viewer, is_final=False):
+        """Update reading progress based on current viewer state"""
         try:
-            # Get websign from the row
-            table = self.main_window.table
-            websign_item = table.item(row, 0)
-            if not websign_item:
-                QMessageBox.warning(self.main_window, "Update Tag Error", "No websign found for this row.")
+            if not hasattr(viewer, 'row_index'):
                 return
             
-            websign = websign_item.data(Qt.ItemDataRole.UserRole)
-            if not websign:
-                websign = websign_item.text()
+            row = viewer.row_index
+            image_manager = viewer.image_manager
             
-            if not websign:
-                QMessageBox.warning(self.main_window, "Update Tag Error", "Invalid websign value.")
-                return
+            if image_manager.has_images():
+                current_index = image_manager.get_current_index()
+                total_images = image_manager.get_image_count()
+                
+                if total_images > 0:
+                    # Calculate progress percentage (integer only)
+                    progress = int((current_index / total_images) * 100)
+                    
+                    # Update progress in table
+                    self.main_window.table_controller.update_progress(row, progress)
+                    
+                    # If this is the final update and user reached the end, mark as completed
+                    if is_final and current_index == total_images - 1:
+                        self.main_window.table_controller.update_progress(row, 100)
+                        
+        except Exception as e:
+            print(f"Error updating viewer progress: {e}")
+    
+    def update_tag_for_row(self, rows):
+        """Update tags for rows using universal thread class"""
+        if not isinstance(rows, list):
+            rows = [rows]
+        
+        if not rows:
+            return
+        
+        is_batch = len(rows) > 1
+        
+        try:
+            # Configure progress dialog based on operation type
+            if is_batch:
+                progress_text = f"Fetching tags for {len(rows)} items..."
+                progress_dialog = QProgressDialog(progress_text, "Cancel", 0, len(rows), self.main_window)
+            else:
+                progress_text = f"Fetching tags for websign {self.get_websign_from_row(rows[0])}..."
+                progress_dialog = QProgressDialog(progress_text, "Cancel", 0, 0, self.main_window)
             
-            # Get JM website from config
-            jm_website = self.config_manager.get_jm_website()
-            if not jm_website:
-                QMessageBox.warning(self.main_window, "Update Tag Error", "JM website is not configured.")
-                return
-            
-            # Construct URL
-            url = f"https://{jm_website}/album/{websign}"
-            
-            # Show progress dialog
-            progress_dialog = QProgressDialog(f"Fetching tags for websign {websign}...", "Cancel", 0, 0, self.main_window)
-            progress_dialog.setWindowTitle("Updating Tag")
+            progress_dialog.setWindowTitle("Updating Tags" if is_batch else "Updating Tag")
             progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
             progress_dialog.show()
             
-            # Create and start background thread
-            self.tag_fetch_thread = TagFetchThread(url, websign)
-            self.tag_fetch_thread.finished.connect(lambda tags: self.on_tag_fetch_finished(row, tags, progress_dialog))
-            self.tag_fetch_thread.error.connect(lambda error: self.on_tag_fetch_error(error, progress_dialog))
+            # Create and start universal thread
+            self.tag_fetch_thread = TagFetchThread(rows, self.main_window, self.config_manager, is_batch)
+            
+            # Connect signals based on operation type
+            if is_batch:
+                self.tag_fetch_thread.progress_updated.connect(progress_dialog.setValue)
+                self.tag_fetch_thread.batch_finished.connect(lambda: self.on_batch_tags_finished(progress_dialog))
+            else:
+                self.tag_fetch_thread.single_finished.connect(lambda row, tags: self.on_single_tag_finished(row, tags, progress_dialog))
+            
+            self.tag_fetch_thread.error.connect(lambda error: self.on_tag_fetch_error(error, progress_dialog, is_batch))
             self.tag_fetch_thread.start()
+            
+            # Connect cancel button for batch operations
+            if is_batch:
+                progress_dialog.canceled.connect(self.tag_fetch_thread.cancel)
             
         except Exception as e:
             QMessageBox.critical(self.main_window, "Update Tag Error", f"Failed to start tag update: {str(e)}")
-    
-    def on_tag_fetch_finished(self, row, tags, progress_dialog):
-        """Handle successful tag fetch"""
+
+    def on_single_tag_finished(self, row, tags, progress_dialog):
+        """Handle single tag fetch completion"""
         progress_dialog.close()
         
         if tags:
-            # Join multiple tags with comma
             tag_text = ", ".join(tags)
-            
-            # Update the tag column (column 7)
             tag_item = QTableWidgetItem(tag_text)
             self.main_window.table.setItem(row, 7, tag_item)
-            
             QMessageBox.information(self.main_window, "Update Tag", 
-                                  f"Successfully updated tags for websign {self.get_websign_from_row(row)}:\n\n{tag_text}")
+                                f"Successfully updated tags for websign {self.get_websign_from_row(row)}:\n\n{tag_text}")
         else:
             QMessageBox.information(self.main_window, "Update Tag", 
-                                  f"No tags found for websign {self.get_websign_from_row(row)}")
-    
-    def on_tag_fetch_error(self, error_msg, progress_dialog):
+                                f"No tags found for websign {self.get_websign_from_row(row)}")
+
+    def on_batch_tags_finished(self, progress_dialog):
+        """Handle batch tag update completion"""
+        progress_dialog.close()
+        QMessageBox.information(self.main_window, "Update Tags", "Batch tag update completed!")
+
+    def on_tag_fetch_error(self, error_msg, progress_dialog, is_batch):
         """Handle tag fetch error"""
         progress_dialog.close()
-        QMessageBox.critical(self.main_window, "Update Tag Error", f"Failed to fetch tags: {error_msg}")
-    
+        operation_type = "batch tag update" if is_batch else "tag update"
+        QMessageBox.critical(self.main_window, "Update Tag Error", f"Failed to {operation_type}: {error_msg}")
+
     def get_websign_from_row(self, row):
         """Helper method to get websign from row"""
         websign_item = self.main_window.table.item(row, 0)
@@ -535,64 +629,100 @@ class WebsiteRefreshThread(QThread):
             self.error.emit(f"Unexpected error: {str(e)}")
 
 class TagFetchThread(QThread):
-    """Background thread for fetching tags from website"""
-    finished = pyqtSignal(list)  # list of tags
-    error = pyqtSignal(str)      # error message
+    """Universal tag fetching thread, supports both single row and batch operations"""
+    progress_updated = pyqtSignal(int)  # Progress update
+    single_finished = pyqtSignal(int, list)  # Single row completed: row index, tag list
+    batch_finished = pyqtSignal()  # Batch completed
+    error = pyqtSignal(str)  # Error message
     
-    def __init__(self, url, websign):
+    def __init__(self, rows, main_window, config_manager, is_batch=False):
         super().__init__()
-        self.url = url
-        self.websign = websign
+        self.rows = rows if isinstance(rows, list) else [rows]
+        self.main_window = main_window
+        self.config_manager = config_manager
+        self.is_batch = is_batch
+        self.cancelled = False
     
     def run(self):
+        """Main execution method"""
         try:
-            # Fetch webpage content
-            html_content = self.fetch_webpage(self.url)
-            if not html_content:
-                raise Exception("Failed to fetch webpage content")
+            jm_website = self.config_manager.get_jm_website()
+            if not jm_website:
+                self.error.emit("JM website is not configured.")
+                return
             
-            # Extract tags using CSS selector
-            tags = self.extract_tags(html_content)
+            for i, row in enumerate(self.rows):
+                if self.cancelled:
+                    break
+                    
+                # Get websign for current row
+                websign_item = self.main_window.table.item(row, 0)
+                if not websign_item:
+                    continue
+                    
+                websign = websign_item.data(Qt.ItemDataRole.UserRole)
+                if not websign:
+                    websign = websign_item.text()
+                
+                if not websign:
+                    continue
+                
+                # Fetch tags from website
+                url = f"https://{jm_website}/album/{websign}"
+                tags = self.fetch_tags_from_url(url)
+                
+                if self.is_batch:
+                    # Batch mode: update table directly
+                    if tags:
+                        tag_text = ", ".join(tags)
+                        tag_item = QTableWidgetItem(tag_text)
+                        self.main_window.table.setItem(row, 7, tag_item)
+                else:
+                    # Single mode: emit signal for UI update
+                    self.single_finished.emit(row, tags if tags else [])
+                
+                # Update progress
+                self.progress_updated.emit(i + 1)
+                
+                # Small delay to avoid overwhelming the server
+                if self.is_batch and i < len(self.rows) - 1:
+                    self.msleep(500)
             
-            self.finished.emit(tags)
+            # Emit completion signal
+            if self.is_batch:
+                self.batch_finished.emit()
             
         except Exception as e:
             self.error.emit(str(e))
     
-    def fetch_webpage(self, url, timeout=10, retries=3):
-        """Fetch webpage content with random User-Agent"""
-        headers = {
-            'User-Agent': get_random_user_agent(),
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate',
-            'Connection': 'keep-alive',
-        }
-        
-        for attempt in range(retries):
-            try:
-                response = requests.get(url, headers=headers, timeout=timeout)
-                response.raise_for_status()
-                return response.text
-            except requests.exceptions.RequestException as e:
-                if attempt < retries - 1:
-                    import time
-                    time.sleep(2)
-                else:
-                    return None
+    def fetch_tags_from_url(self, url):
+        """Fetch tags from website using CSS selector"""
+        try:
+            headers = {
+                'User-Agent': get_random_user_agent(),
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+            }
+            
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            
+            # Extract tags using CSS selector
+            soup = BeautifulSoup(response.text, 'html.parser')
+            tag_elements = soup.select('span[data-type="tags"] a.btn.phone-tags-tag')
+            
+            tags = []
+            for tag_element in tag_elements:
+                tag_text = tag_element.get_text(strip=True)
+                if tag_text:
+                    tags.append(tag_text)
+            
+            return tags
+            
+        except Exception as e:
+            print(f"Error fetching tags from {url}: {e}")
+            return None
     
-    def extract_tags(self, html_content):
-        """Extract tags from HTML using the specified CSS selector"""
-        soup = BeautifulSoup(html_content, 'html.parser')
-        
-        # Find all tag elements using the specified CSS selector
-        tag_elements = soup.select('span[data-type="tags"] a.btn.phone-tags-tag')
-        
-        # Extract text from each tag element
-        tags = []
-        for tag_element in tag_elements:
-            tag_text = tag_element.get_text(strip=True)
-            if tag_text:
-                tags.append(tag_text)
-        
-        return tags
+    def cancel(self):
+        """Cancel the operation"""
+        self.cancelled = True
