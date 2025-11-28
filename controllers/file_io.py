@@ -350,7 +350,7 @@ class FileIO:
             
             for row in range(self.main_window.table.rowCount()):
                 row_data = []
-                for col in range(8):
+                for col in range(10):
                     item = self.main_window.table.item(row, col)
                     if item:
                         # Handle websign special case

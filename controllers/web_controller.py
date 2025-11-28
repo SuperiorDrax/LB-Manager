@@ -385,7 +385,7 @@ class WebController:
         if rows:
             self._view_single_zip_image(rows[0])
 
-    def _view_single_zip_imag(self, row):
+    def _view_single_zip_image(self, row):
         """Complete ZIP image viewing process with delete option for missing files"""
         try:
             # 1. Get websign

@@ -14,6 +14,7 @@ class DataParser:
         tag = ""
         read_status = "unread"
         progress = 0
+        file_path = ""
         
         # Extract websign from the beginning (1-7 digit integer)
         websign_match = re.match(r'^(\d{1,7})\s*(.*)', text)
@@ -75,4 +76,4 @@ class DataParser:
         if not websign or not author or not title:
             return None
         
-        return author, title, group, show, magazine, origin, websign, tag, read_status, progress
+        return author, title, group, show, magazine, origin, websign, tag, read_status, progress, file_path

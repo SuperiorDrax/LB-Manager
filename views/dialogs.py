@@ -341,6 +341,178 @@ Leave unchecked for simple text search.
             return
         self.done(2)  # Return code 2 for filter
 
+class EditDialog(QDialog):
+    def __init__(self, parent=None, row_data=None):
+        super().__init__(parent)
+        self.row_data = row_data or {}
+        self.setWindowTitle("Edit Row Data")
+        self.setModal(True)
+        self.resize(400, 300)
+        self.init_ui()
+        self.populate_data()
+    
+    def init_ui(self):
+        """Initialize the edit dialog UI"""
+        layout = QVBoxLayout()
+        layout.setSpacing(10)
+        layout.setContentsMargins(15, 15, 15, 15)
+        
+        # Create input fields for editable columns
+        self.fields = {}
+        
+        # Websign field
+        websign_layout = QHBoxLayout()
+        websign_label = QLabel("websign:")
+        websign_label.setFixedWidth(80)
+        self.websign_input = QLineEdit()
+        websign_layout.addWidget(websign_label)
+        websign_layout.addWidget(self.websign_input)
+        layout.addLayout(websign_layout)
+        self.fields['websign'] = self.websign_input
+        
+        # Author field
+        author_layout = QHBoxLayout()
+        author_label = QLabel("author:")
+        author_label.setFixedWidth(80)
+        self.author_input = QLineEdit()
+        author_layout.addWidget(author_label)
+        author_layout.addWidget(self.author_input)
+        layout.addLayout(author_layout)
+        self.fields['author'] = self.author_input
+        
+        # Title field
+        title_layout = QHBoxLayout()
+        title_label = QLabel("title:")
+        title_label.setFixedWidth(80)
+        self.title_input = QLineEdit()
+        title_layout.addWidget(title_label)
+        title_layout.addWidget(self.title_input)
+        layout.addLayout(title_layout)
+        self.fields['title'] = self.title_input
+        
+        # Group field
+        group_layout = QHBoxLayout()
+        group_label = QLabel("group:")
+        group_label.setFixedWidth(80)
+        self.group_input = QLineEdit()
+        group_layout.addWidget(group_label)
+        group_layout.addWidget(self.group_input)
+        layout.addLayout(group_layout)
+        self.fields['group'] = self.group_input
+        
+        # Show field
+        show_layout = QHBoxLayout()
+        show_label = QLabel("show:")
+        show_label.setFixedWidth(80)
+        self.show_input = QLineEdit()
+        show_layout.addWidget(show_label)
+        show_layout.addWidget(self.show_input)
+        layout.addLayout(show_layout)
+        self.fields['show'] = self.show_input
+        
+        # Magazine field
+        magazine_layout = QHBoxLayout()
+        magazine_label = QLabel("magazine:")
+        magazine_label.setFixedWidth(80)
+        self.magazine_input = QLineEdit()
+        magazine_layout.addWidget(magazine_label)
+        magazine_layout.addWidget(self.magazine_input)
+        layout.addLayout(magazine_layout)
+        self.fields['magazine'] = self.magazine_input
+        
+        # Origin field
+        origin_layout = QHBoxLayout()
+        origin_label = QLabel("origin:")
+        origin_label.setFixedWidth(80)
+        self.origin_input = QLineEdit()
+        origin_layout.addWidget(origin_label)
+        origin_layout.addWidget(self.origin_input)
+        layout.addLayout(origin_layout)
+        self.fields['origin'] = self.origin_input
+        
+        # Tag field
+        tag_layout = QHBoxLayout()
+        tag_label = QLabel("tag:")
+        tag_label.setFixedWidth(80)
+        self.tag_input = QLineEdit()
+        tag_layout.addWidget(tag_label)
+        tag_layout.addWidget(self.tag_input)
+        layout.addLayout(tag_layout)
+        self.fields['tag'] = self.tag_input
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        self.save_button = QPushButton("Save")
+        self.cancel_button = QPushButton("Cancel")
+        
+        button_layout.addWidget(self.save_button)
+        button_layout.addWidget(self.cancel_button)
+        
+        layout.addLayout(button_layout)
+        
+        self.setLayout(layout)
+        
+        # Connect signals
+        self.save_button.clicked.connect(self.validate_and_save)
+        self.cancel_button.clicked.connect(self.reject)
+    
+    def populate_data(self):
+        """Populate the form with current row data"""
+        if self.row_data:
+            self.websign_input.setText(self.row_data.get('websign', ''))
+            self.author_input.setText(self.row_data.get('author', ''))
+            self.title_input.setText(self.row_data.get('title', ''))
+            self.group_input.setText(self.row_data.get('group', ''))
+            self.show_input.setText(self.row_data.get('show', ''))
+            self.magazine_input.setText(self.row_data.get('magazine', ''))
+            self.origin_input.setText(self.row_data.get('origin', ''))
+            self.tag_input.setText(self.row_data.get('tag', ''))
+    
+    def validate_and_save(self):
+        """Validate input and save if valid"""
+        # Get values
+        websign = self.websign_input.text().strip()
+        author = self.author_input.text().strip()
+        title = self.title_input.text().strip()
+        
+        # Validate required fields
+        if not websign:
+            QMessageBox.warning(self, "Validation Error", "websign cannot be empty.")
+            return
+        
+        if not author:
+            QMessageBox.warning(self, "Validation Error", "author cannot be empty.")
+            return
+        
+        if not title:
+            QMessageBox.warning(self, "Validation Error", "title cannot be empty.")
+            return
+        
+        # Validate websign is positive integer
+        try:
+            websign_int = int(websign)
+            if websign_int <= 0:
+                raise ValueError
+        except ValueError:
+            QMessageBox.warning(self, "Validation Error", "websign must be a positive integer.")
+            return
+        
+        # All validations passed
+        self.accept()
+    
+    def get_edited_data(self):
+        """Get all edited data"""
+        return {
+            'websign': self.websign_input.text().strip(),
+            'author': self.author_input.text().strip(),
+            'title': self.title_input.text().strip(),
+            'group': self.group_input.text().strip(),
+            'show': self.show_input.text().strip(),
+            'magazine': self.magazine_input.text().strip(),
+            'origin': self.origin_input.text().strip(),
+            'tag': self.tag_input.text().strip()
+        }
+
 class JMDataFetchThread(QThread):
     """Background thread for fetching JM data in insert dialog"""
     finished = pyqtSignal(dict)  # Changed to dict to include both extracted_texts and tags

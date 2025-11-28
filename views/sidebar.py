@@ -72,7 +72,7 @@ class Sidebar(QWidget):
         layout.addStretch()
         
         self.setLayout(layout)
-        self.setFixedWidth(280)
+        self.setFixedWidth(220)
 
         # Connect tag cloud signals
         self.tag_cloud.tag_clicked.connect(self.on_tag_clicked)

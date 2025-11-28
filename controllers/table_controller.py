@@ -21,6 +21,7 @@ class TableController(QObject):
     def add_to_table(self, data):
         """Add parsed data to table with tag support"""
         author, title, group, show, magazine, origin, websign, tag, read_status, progress = data
+        file_path = ""
 
         table = self.main_window.table
         
@@ -45,6 +46,9 @@ class TableController(QObject):
         # Create progress item
         progress_item = QTableWidgetItem(f"{progress}%")
         progress_item.setData(Qt.ItemDataRole.UserRole, progress)
+
+        # Create file path item (empty by default)
+        file_path_item = QTableWidgetItem(file_path)
         
         # Set data in table - now 8 columns
         table.setItem(row_position, 0, websign_item)                 # websign
@@ -57,6 +61,7 @@ class TableController(QObject):
         table.setItem(row_position, 7, QTableWidgetItem(tag))        # tag
         table.setItem(row_position, 8, read_status_item)             # read_status
         table.setItem(row_position, 9, progress_item)                # progress
+        table.setItem(row_position, 10, file_path_item)              # file_path
 
         if websign not in self.websign_tracker:
             self.websign_tracker[websign] = []
@@ -374,20 +379,23 @@ class TableController(QObject):
         return msg.exec()
 
     def rebuild_websign_tracker(self):
-        """Rebuild websign tracker from current table data and update highlighting"""
+        """Rebuild the websign tracker from current table data"""
         self.websign_tracker.clear()
         
-        # Build new tracker
         for row in range(self.main_window.table.rowCount()):
             websign_item = self.main_window.table.item(row, 0)
             if websign_item and websign_item.text():
-                websign = websign_item.text()
+                websign = websign_item.data(Qt.ItemDataRole.UserRole)
+                if not websign:
+                    websign = websign_item.text()
+                
                 if websign not in self.websign_tracker:
                     self.websign_tracker[websign] = []
                 self.websign_tracker[websign].append(row)
-        
-        # Re-apply highlighting (this will now preserve alternating colors)
-        self.reapply_duplicate_highlighting()
+                
+                # Update duplicate highlighting
+                if len(self.websign_tracker[websign]) > 1:
+                    self.highlight_duplicate_rows(websign)
 
     def on_row_removed(self, deleted_row):
         """Update websign tracker and other data when row is removed"""

@@ -115,7 +115,7 @@ class ImageViewer(QMainWindow):
         self.batch_delete_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         
         self.undo_delete_button = QPushButton("Undo")
-        self.undo_delete_button.setFixedWidth(80)  # 稍微减小宽度
+        self.undo_delete_button.setFixedWidth(80)
         self.undo_delete_button.setEnabled(False)
         self.undo_delete_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.undo_delete_button.setToolTip("Undo last operation (Ctrl+Z)")
@@ -147,7 +147,7 @@ class ImageViewer(QMainWindow):
     def create_thumbnail_bar(self):
         """Create thumbnail navigation bar"""
         self.thumbnail_widget = QWidget()
-        self.thumbnail_widget.setFixedHeight(100)
+        self.thumbnail_widget.setFixedHeight(80)
         self.thumbnail_widget.setStyleSheet("QWidget { background-color: #1a1a1a; }")
         
         thumbnail_layout = QHBoxLayout(self.thumbnail_widget)
@@ -159,7 +159,7 @@ class ImageViewer(QMainWindow):
         self.thumbnail_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.thumbnail_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.thumbnail_scroll.setWidgetResizable(True)
-        self.thumbnail_scroll.setFixedHeight(90)
+        self.thumbnail_scroll.setFixedHeight(70)
         
         # Container for thumbnail buttons with centered alignment
         self.thumbnail_container = QWidget()
@@ -189,7 +189,7 @@ class ImageViewer(QMainWindow):
         
         for index, (_, display_name) in enumerate(image_list):
             thumbnail_btn = QPushButton()
-            thumbnail_btn.setFixedSize(70, 70)  # Reduced from 80x80 to 70x70
+            thumbnail_btn.setFixedSize(50, 50)  # Reduced from 80x80 to 70x70
             thumbnail_btn.setCheckable(True)
             thumbnail_btn.setStyleSheet("""
                 QPushButton {
@@ -215,36 +215,6 @@ class ImageViewer(QMainWindow):
         
         # Highlight current image
         self.update_thumbnail_selection()
-
-    def create_thumbnail_bar(self):
-        """Create thumbnail navigation bar"""
-        self.thumbnail_widget = QWidget()
-        self.thumbnail_widget.setFixedHeight(100)
-        self.thumbnail_widget.setStyleSheet("QWidget { background-color: #1a1a1a; }")
-        
-        thumbnail_layout = QHBoxLayout(self.thumbnail_widget)
-        thumbnail_layout.setContentsMargins(5, 5, 5, 5)
-        thumbnail_layout.setSpacing(3)
-        
-        # Scroll area for thumbnails
-        self.thumbnail_scroll = QScrollArea()
-        self.thumbnail_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.thumbnail_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.thumbnail_scroll.setWidgetResizable(True)
-        self.thumbnail_scroll.setFixedHeight(90)
-        
-        # Container for thumbnail buttons with centered alignment
-        self.thumbnail_container = QWidget()
-        self.thumbnail_container_layout = QHBoxLayout(self.thumbnail_container)
-        self.thumbnail_container_layout.setContentsMargins(2, 2, 2, 2)
-        self.thumbnail_container_layout.setSpacing(3)
-        self.thumbnail_container_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        self.thumbnail_scroll.setWidget(self.thumbnail_container)
-        thumbnail_layout.addWidget(self.thumbnail_scroll)
-        
-        # Store thumbnail buttons for easy access
-        self.thumbnail_buttons = []
 
     def load_thumbnail_image(self, button, index, display_name):
         """Load and set thumbnail image for button"""

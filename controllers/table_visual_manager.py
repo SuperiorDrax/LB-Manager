@@ -18,16 +18,18 @@ class TableVisualManager:
         
         # Add column visibility controls
         column_names = [
-            'websign', 'author', 'title', 'group', 'show', 'magazine', 'origin', 'tag', 'read_status', 'progress'
+            'websign', 'author', 'title', 'group', 'show', 'magazine', 'origin', 'tag', 'read_status', 'progress', 'file_path'
         ]
         
-        for i, name in enumerate(column_names):
-            action = QAction(name, self.main_window)
-            action.setCheckable(True)
-            action.setChecked(not self.main_window.table.isColumnHidden(i))
-            action.setData(i)  # Store column index
-            action.triggered.connect(lambda checked, idx=i: self.toggle_column_visibility(idx, checked))
-            context_menu.addAction(action)
+        # Add visibility toggle actions for all columns
+        for i, column_name in enumerate(column_names):
+            if i < self.main_window.table.columnCount():
+                action = context_menu.addAction(column_name)
+                action.setCheckable(True)
+                # file_path column (index 10) is unchecked by default
+                is_visible = not self.main_window.table.isColumnHidden(i)
+                action.setChecked(is_visible)
+                action.triggered.connect(lambda checked, idx=i: self.toggle_column_visibility(idx, checked))
         
         # Show menu at cursor position
         context_menu.exec(self.main_window.table.horizontalHeader().mapToGlobal(position))

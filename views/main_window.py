@@ -1,8 +1,8 @@
-from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QPushButton, QMessageBox, QMenu, QDialog, QLineEdit, QFileDialog, QApplication
+from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QPushButton, QMessageBox, QMenu, QDialog, QTableWidgetItem
 from PyQt6.QtCore import Qt, QTimer
 from models.config_manager import ConfigManager
 from models.data_parser import DataParser
-from views.dialogs import InsertDialog, SearchDialog
+from views.dialogs import InsertDialog, SearchDialog, EditDialog
 from controllers.file_io import FileIO
 from controllers.table_controller import TableController
 from controllers.state_manager import StateManager
@@ -75,22 +75,26 @@ class MainWindow(QMainWindow):
         
         # Create table using enhanced version
         self.table = EnhancedTableWidget()
-        self.table.setColumnCount(10)
+        self.table.setColumnCount(11)
         self.table.setHorizontalHeaderLabels([
-            'websign', 'author', 'title', 'group', 'show', 'magazine', 'origin', 'tag', 'read_status', 'progress'
+            'websign', 'author', 'title', 'group', 'show', 'magazine', 'origin', 'tag', 'read_status', 'progress', 'file_path'
         ])
         
         # Set column widths
-        self.table.setColumnWidth(0, 80)
-        self.table.setColumnWidth(1, 120)
-        self.table.setColumnWidth(2, 200)
-        self.table.setColumnWidth(3, 100)
-        self.table.setColumnWidth(4, 100)
-        self.table.setColumnWidth(5, 120)
-        self.table.setColumnWidth(6, 120)
-        self.table.setColumnWidth(7, 150)
-        self.table.setColumnWidth(8, 80)
-        self.table.setColumnWidth(9, 80)
+        self.table.setColumnWidth(0, 80)   # websign
+        self.table.setColumnWidth(1, 120)  # author
+        self.table.setColumnWidth(2, 200)  # title
+        self.table.setColumnWidth(3, 100)  # group
+        self.table.setColumnWidth(4, 100)  # show
+        self.table.setColumnWidth(5, 120)  # magazine
+        self.table.setColumnWidth(6, 120)  # origin
+        self.table.setColumnWidth(7, 150)  # tag
+        self.table.setColumnWidth(8, 80)   # read_status
+        self.table.setColumnWidth(9, 80)   # progress
+        self.table.setColumnWidth(10, 100)   # file_path
+
+        # Hide file_path column by default
+        self.table.setColumnHidden(10, True)
         
         # Enable other table features
         self.table.setSortingEnabled(True)
@@ -222,6 +226,7 @@ class MainWindow(QMainWindow):
         context_menu = QMenu(self)
         
         # Always show these actions (work for both single and multiple)
+        edit_action = context_menu.addAction("Edit")
         view_zip_action = context_menu.addAction("View")
         view_online_action = context_menu.addAction("View online")
         update_tag_action = context_menu.addAction("Update Tag")
@@ -230,6 +235,7 @@ class MainWindow(QMainWindow):
         view_zip_action.triggered.connect(lambda: self.web_controller.view_zip_images(selected_rows))
         view_online_action.triggered.connect(lambda: self.web_controller.view_online(selected_rows))
         update_tag_action.triggered.connect(lambda: self.web_controller.update_tag_for_row(selected_rows))
+        edit_action.triggered.connect(lambda: self.edit_rows(selected_rows))
         
         # Read status submenu
         read_status_menu = context_menu.addMenu("Mark as")
@@ -566,3 +572,90 @@ class MainWindow(QMainWindow):
                 selected_rows.add(row)
         
         return sorted(list(selected_rows))
+
+    def edit_rows(self, rows):
+        """Edit selected rows - for multiple rows, only edit the first one"""
+        if not rows:
+            return
+        
+        # For multiple rows, only edit the first one
+        row_to_edit = rows[0] if isinstance(rows, list) else rows
+        
+        # Get current row data
+        row_data = self.get_row_data(row_to_edit)
+        
+        # Open edit dialog
+        dialog = EditDialog(self, row_data)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            edited_data = dialog.get_edited_data()
+            self.update_row_data(row_to_edit, edited_data)
+    
+    def get_row_data(self, row):
+        """Get current data from the specified row"""
+        return {
+            'websign': self.get_cell_text(row, 0),
+            'author': self.get_cell_text(row, 1),
+            'title': self.get_cell_text(row, 2),
+            'group': self.get_cell_text(row, 3),
+            'show': self.get_cell_text(row, 4),
+            'magazine': self.get_cell_text(row, 5),
+            'origin': self.get_cell_text(row, 6),
+            'tag': self.get_cell_text(row, 7)
+        }
+    
+    def get_cell_text(self, row, column):
+        """Get text from specific cell"""
+        item = self.table.item(row, column)
+        if item:
+            # For websign column, get the original data
+            if column == 0:
+                websign_data = item.data(Qt.ItemDataRole.UserRole)
+                return websign_data if websign_data else item.text()
+            return item.text()
+        return ""
+    
+    def update_row_data(self, row, data):
+        """Update row with edited data"""
+        try:
+            # Check if tag was actually changed
+            old_tag = self.get_cell_text(row, 7)
+            tag_changed = (old_tag != data['tag'])
+            
+            # Update websign (special handling)
+            websign_item = self.table.item(row, 0)
+            if websign_item:
+                websign_item.setData(Qt.ItemDataRole.UserRole, data['websign'])
+                if data['websign'].isdigit():
+                    websign_item.setData(Qt.ItemDataRole.DisplayRole, int(data['websign']))
+                else:
+                    websign_item.setText(data['websign'])
+            
+            # Update other fields
+            self.set_cell_text(row, 1, data['author'])
+            self.set_cell_text(row, 2, data['title'])
+            self.set_cell_text(row, 3, data['group'])
+            self.set_cell_text(row, 4, data['show'])
+            self.set_cell_text(row, 5, data['magazine'])
+            self.set_cell_text(row, 6, data['origin'])
+            self.set_cell_text(row, 7, data['tag'])
+            
+            # Rebuild websign tracker to update duplicates highlighting
+            self.table_controller.rebuild_websign_tracker()
+            
+            # Update tag cloud if tag data was changed
+            if tag_changed:
+                self.update_sidebar_counts()
+            
+            QMessageBox.information(self, "Edit", "Row data updated successfully.")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Edit Error", f"Failed to update row: {str(e)}")
+    
+    def set_cell_text(self, row, column, text):
+        """Set text for specific cell"""
+        item = self.table.item(row, column)
+        if item:
+            item.setText(text)
+        else:
+            new_item = QTableWidgetItem(text)
+            self.table.setItem(row, column, new_item)
