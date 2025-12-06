@@ -1,5 +1,6 @@
-from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QPushButton, QMessageBox, QMenu, QDialog, QTableWidgetItem
+from PyQt6.QtWidgets import QSplitter, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QPushButton, QMessageBox, QMenu, QDialog, QTableWidgetItem
 from PyQt6.QtCore import Qt, QTimer
+from views.detail_panel import DetailPanel
 from models.config_manager import ConfigManager
 from models.data_parser import DataParser
 from views.dialogs import InsertDialog, SearchDialog, EditDialog
@@ -18,7 +19,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         
         # Set default window size before restoring state
-        self.resize(870, 500)  # Larger default size
+        self.resize(1200, 700)  # Larger default size
         
         # Initialize managers and controllers
         self.config_manager = ConfigManager()
@@ -43,6 +44,16 @@ class MainWindow(QMainWindow):
         # Initialize sidebar
         self.sidebar = Sidebar(self)
         self.sidebar.tag_filter_changed.connect(self.apply_tag_filter)
+
+        # Initialize detail panel
+        self.detail_panel = DetailPanel(self)
+
+        # Restore window state
+        self.state_manager.restore_window_state()
+        
+        # Initialize sidebar
+        self.sidebar = Sidebar(self)
+        self.sidebar.tag_filter_changed.connect(self.apply_tag_filter)
         
         self.init_ui()
 
@@ -64,15 +75,18 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # Add sidebar
-        main_layout.addWidget(self.sidebar)
+        # Create splitter for resizable panels
+        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # Create right side container for table and buttons
-        right_container = QWidget()
-        right_layout = QVBoxLayout()
-        right_layout.setContentsMargins(10, 10, 10, 10)
-        right_layout.setSpacing(10)
-        
+        # Add sidebar
+        self.main_splitter.addWidget(self.sidebar)
+
+        # Create middle container for table
+        middle_container = QWidget()
+        middle_layout = QVBoxLayout()
+        middle_layout.setContentsMargins(10, 10, 10, 10)
+        middle_layout.setSpacing(10)
+
         # Create table using enhanced version
         self.table = EnhancedTableWidget()
         self.table.setColumnCount(11)
@@ -103,11 +117,11 @@ class MainWindow(QMainWindow):
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_context_menu)
 
-        # Add table and buttons (existing code)
-        right_layout.addWidget(self.table)
-
         # Connect double-click signal
         self.table.doubleClicked.connect(self.on_table_double_click)
+
+        # Connect selection change signal
+        self.table.itemSelectionChanged.connect(self.on_table_selection_changed)
 
         # Create buttons
         button_layout = QHBoxLayout()
@@ -118,15 +132,39 @@ class MainWindow(QMainWindow):
         button_layout.addWidget(self.search_button)
         button_layout.addWidget(self.clear_button)
         button_layout.addStretch()  # Add stretch to push buttons to left
-        right_layout.addLayout(button_layout)
+
+        # Add table and buttons to middle layout
+        middle_layout.addWidget(self.table)
+        middle_layout.addLayout(button_layout)
+
+        middle_container.setLayout(middle_layout)
+        self.main_splitter.addWidget(middle_container)
+
+        # Add detail panel
+        self.main_splitter.addWidget(self.detail_panel)
+
+        # Set initial splitter sizes (sidebar: 220, middle: rest, detail: 300)
+        self.main_splitter.setSizes([220, 500, 300])
+
+        # Set splitter handle style
+        self.main_splitter.setHandleWidth(1)
+        self.main_splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #bdc3c7;
+            }
+            QSplitter::handle:hover {
+                background-color: #95a5a6;
+            }
+        """)
+
+        # Add splitter to main layout
+        main_layout.addWidget(self.main_splitter)
+        central_widget.setLayout(main_layout)
 
         # Add filter state tracking
         self.is_filtered = False
-        self.original_row_visibility = [] # Store original row visibility state 
-        
-        right_container.setLayout(right_layout)
-        main_layout.addWidget(right_container)
-        
+        self.original_row_visibility = [] # Store original row visibility state
+
         central_widget.setLayout(main_layout)
 
         # Enable sorting and column dragging
@@ -144,8 +182,6 @@ class MainWindow(QMainWindow):
         # Connect signals
         self.table.horizontalHeader().sectionResized.connect(self.state_manager.on_column_resized)
         self.table.horizontalHeader().sectionMoved.connect(self.state_manager.on_column_moved)
-        
-        # Connect signals
         self.search_button.clicked.connect(self.show_search_dialog)
         self.clear_button.clicked.connect(self.clear_table)
 
@@ -158,6 +194,9 @@ class MainWindow(QMainWindow):
         
         # Remove original context menu policy, use event filter instead
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
+
+        # Update sidebar counts initially
+        self.update_sidebar_counts()
     
     def create_menu_bar(self):
         menu_bar = self.menuBar()
@@ -334,6 +373,8 @@ class MainWindow(QMainWindow):
             self.table_controller.original_row_visibility = []
             self.table_controller.filter_state_changed.emit(False)
             self.update_sidebar_counts()
+            # Clear detail panel
+            self.detail_panel.show_empty_state()
     
     def fetch_zip_numbers(self, lib_path):
         """Recursively scan directory and extract integers from ZIP filenames"""
@@ -390,7 +431,11 @@ class MainWindow(QMainWindow):
             raise Exception(f"Failed to save numbers to file: {str(e)}")
     
     def closeEvent(self, event):
-        """Ensure thread is properly cleaned up"""
+        """Ensure thread is properly cleaned up and save layout"""
+        # Save panel layout
+        if hasattr(self, 'state_manager'):
+            self.state_manager.save_panel_layout()
+        
         if hasattr(self, 'refresh_thread') and self.refresh_thread.isRunning():
             self.refresh_thread.terminate()
             self.refresh_thread.wait()
@@ -562,6 +607,25 @@ class MainWindow(QMainWindow):
                 # Restore cursor
                 self.setCursor(Qt.CursorShape.ArrowCursor)
 
+    def on_table_selection_changed(self):
+        """Handle table selection changes to update detail panel"""
+        selected_rows = self.get_selected_rows()
+        
+        if not selected_rows:
+            # No rows selected
+            self.detail_panel.show_empty_state()
+        elif len(selected_rows) > 1:
+            # Multiple rows selected
+            self.detail_panel.show_multiple_selection_state(len(selected_rows))
+            # Show details for first selected row
+            if selected_rows:
+                row_data = self.get_row_data(selected_rows[0])
+                self.detail_panel.update_details(row_data)
+        else:
+            # Single row selected
+            row_data = self.get_row_data(selected_rows[0])
+            self.detail_panel.update_details(row_data)
+
     def get_selected_rows(self):
         """Get all selected row indices"""
         selected_ranges = self.table.selectedRanges()
@@ -600,7 +664,10 @@ class MainWindow(QMainWindow):
             'show': self.get_cell_text(row, 4),
             'magazine': self.get_cell_text(row, 5),
             'origin': self.get_cell_text(row, 6),
-            'tag': self.get_cell_text(row, 7)
+            'tag': self.get_cell_text(row, 7),
+            'read_status': self.get_cell_text(row, 8),
+            'progress': self.get_cell_text(row, 9),
+            'file_path': self.get_cell_text(row, 10)
         }
     
     def get_cell_text(self, row, column):
@@ -611,6 +678,16 @@ class MainWindow(QMainWindow):
             if column == 0:
                 websign_data = item.data(Qt.ItemDataRole.UserRole)
                 return websign_data if websign_data else item.text()
+            # For read_status column, get the actual status from UserRole
+            elif column == 8:
+                status_data = item.data(Qt.ItemDataRole.UserRole)
+                return status_data if status_data else item.text()
+            # For progress column, extract number from text
+            elif column == 9:
+                text = item.text()
+                if text.endswith('%'):
+                    return text[:-1]  # Remove % sign
+                return text
             return item.text()
         return ""
     
@@ -659,3 +736,33 @@ class MainWindow(QMainWindow):
         else:
             new_item = QTableWidgetItem(text)
             self.table.setItem(row, column, new_item)
+
+    def handle_detail_action(self, action_type, row_data):
+        """Handle action requests from detail panel"""
+        # Get current selected rows (use the row that's being displayed)
+        selected_rows = self.get_selected_rows()
+        if not selected_rows:
+            return
+        
+        # Map action types to existing methods
+        action_map = {
+            'unread': lambda: self.table_controller.update_progress(selected_rows, 0),
+            'reading': lambda: self.table_controller.update_progress(selected_rows, 50),
+            'completed': lambda: self.table_controller.update_progress(selected_rows, 100),
+            'progress_0': lambda: self.table_controller.update_progress(selected_rows, 0),
+            'progress_25': lambda: self.table_controller.update_progress(selected_rows, 25),
+            'progress_50': lambda: self.table_controller.update_progress(selected_rows, 50),
+            'progress_75': lambda: self.table_controller.update_progress(selected_rows, 75),
+            'progress_100': lambda: self.table_controller.update_progress(selected_rows, 100),
+            'view_zip': lambda: self.web_controller.view_zip_images(selected_rows),
+            'view_online': lambda: self.web_controller.view_online(selected_rows),
+            'update_tag': lambda: self.web_controller.update_tag_for_row(selected_rows)
+        }
+        
+        if action_type in action_map:
+            try:
+                action_map[action_type]()
+                # Refresh detail panel to show updated status
+                self.on_table_selection_changed()
+            except Exception as e:
+                QMessageBox.critical(self, "Action Error", f"Failed to perform action: {str(e)}")

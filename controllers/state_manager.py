@@ -4,6 +4,7 @@ class StateManager:
     def __init__(self, main_window):
         self.main_window = main_window
         self.config_manager = main_window.config_manager
+        
         # Initialize timers for debounced saving
         self.save_table_timer = QTimer()
         self.save_table_timer.setSingleShot(True)
@@ -12,6 +13,11 @@ class StateManager:
         self.save_column_timer = QTimer()
         self.save_column_timer.setSingleShot(True)
         self.save_column_timer.timeout.connect(self.save_column_config)
+        
+        # Add timer for layout saving
+        self.save_layout_timer = QTimer()
+        self.save_layout_timer.setSingleShot(True)
+        self.save_layout_timer.timeout.connect(self.save_panel_layout)
     
     def save_window_state(self):
         """Save current window and table state"""
@@ -24,11 +30,14 @@ class StateManager:
             window_state = self.config_manager.get_window_state()
             geo_str = window_state['geometry']
         
-        # Save table geometry - dynamic column count
+        # Save table geometry
         table_geometry = []
         current_column_count = self.main_window.table.columnCount()
         for i in range(current_column_count):
             table_geometry.append(str(self.main_window.table.columnWidth(i)))
+        
+        # Save panel layout
+        self.save_panel_layout()
         
         self.config_manager.set_window_state(
             geo_str,
@@ -61,6 +70,12 @@ class StateManager:
         self.restore_table_geometry_timer.setSingleShot(True)
         self.restore_table_geometry_timer.timeout.connect(self.restore_table_geometry)
         self.restore_table_geometry_timer.start(100)
+        
+        # Restore panel layout after UI initialization
+        self.restore_panel_layout_timer = QTimer()
+        self.restore_panel_layout_timer.setSingleShot(True)
+        self.restore_panel_layout_timer.timeout.connect(self.restore_panel_layout)
+        self.restore_panel_layout_timer.start(150)  # Slightly later than table restore
     
     def save_table_geometry(self):
         """Save only table geometry (called on column resize)"""
@@ -241,3 +256,47 @@ class StateManager:
             self.save_table_timer = QTimer()
             self.save_table_timer.setSingleShot(True)
             self.save_table_timer.timeout.connect(self.save_table_geometry)
+
+    def save_panel_layout(self):
+        """Save panel layout (splitter sizes)"""
+        if not hasattr(self.main_window, 'main_splitter'):
+            return
+            
+        sizes = self.main_window.main_splitter.sizes()
+        if len(sizes) >= 3:
+            # Save detail panel width
+            detail_width = sizes[2]
+            if detail_width > 0:  # Only save if panel is visible
+                self.config_manager.set_detail_panel_width(detail_width)
+
+    def restore_panel_layout(self):
+        """Restore panel layout (splitter sizes)"""
+        if not hasattr(self.main_window, 'main_splitter'):
+            return
+            
+        # Get saved detail panel width
+        saved_detail_width = self.config_manager.get_detail_panel_width()
+        
+        # Calculate initial sizes
+        sidebar_width = 220  # Fixed sidebar width
+        detail_width = max(saved_detail_width, 250)  # Minimum 250px
+        
+        # Get available width
+        available_width = self.main_window.width()
+        middle_width = max(available_width - sidebar_width - detail_width, 400)
+        
+        # Set splitter sizes
+        self.main_window.main_splitter.setSizes([sidebar_width, middle_width, detail_width])
+        
+        # Connect splitter movement signal
+        self.main_window.main_splitter.splitterMoved.connect(self.on_splitter_moved)
+
+    def on_splitter_moved(self, pos, index):
+        """Handle splitter movement with debounced saving"""
+        # Save panel layout when splitter is moved
+        if hasattr(self, 'save_layout_timer'):
+            self.save_layout_timer.start(500)  # Save after 500ms
+        else:
+            self.save_layout_timer = QTimer()
+            self.save_layout_timer.setSingleShot(True)
+            self.save_layout_timer.timeout.connect(self.save_panel_layout)

@@ -158,3 +158,17 @@ class ConfigManager:
             self.config.add_section('Validation')
         self.config.set('Validation', 'duplicate_check', str(enabled))
         self.save_config()
+
+    def get_detail_panel_width(self):
+        """Get detail panel width setting"""
+        try:
+            return int(self.config.get('WindowState', 'detail_panel_width', fallback='300'))
+        except (ValueError, KeyError):
+            return 300  # Default width
+
+    def set_detail_panel_width(self, width):
+        """Set detail panel width setting"""
+        if not self.config.has_section('WindowState'):
+            self.config.add_section('WindowState')
+        self.config.set('WindowState', 'detail_panel_width', str(width))
+        self.save_config()
