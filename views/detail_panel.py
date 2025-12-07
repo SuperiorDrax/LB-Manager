@@ -208,82 +208,83 @@ class DetailPanel(QWidget):
         self.update_info_table(row_data)
     
     def update_cover_image(self, websign):
-        """Load and display cover image - scale to fit while keeping aspect ratio"""
+        """Load and display cover image - with larger size for detail panel"""
         if not websign:
-            self.cover_label.setText("No cover")
-            self.cover_label.setStyleSheet("color: #6c757d; font-style: italic;")
-            self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.show_no_cover_state()
             return
         
-        # Clear current pixmap and text
+        # Clear current
         self.cover_label.clear()
         self.cover_label.setText("")
         
-        # Try to get cover image
         try:
             if hasattr(self.main_window, 'web_controller'):
-                pixmap = self.main_window.web_controller.get_cover_image(websign)
+                # Request larger image for detail panel (e.g., 300x400)
+                pixmap = self.main_window.web_controller.get_cover_image(
+                    websign, 
+                    size=(300, 400)  # Larger size for detail panel
+                )
+                
                 if pixmap and not pixmap.isNull():
-                    # Remove any text styling
-                    self.cover_label.setStyleSheet("")
-                    
-                    # Get label size (minimum 240x240)
-                    label_size = self.cover_label.size()
-                    
-                    # Ensure minimum size
-                    if label_size.width() < 240:
-                        label_size.setWidth(240)
-                    if label_size.height() < 240:
-                        label_size.setHeight(240)
-                    
-                    pixmap_size = pixmap.size()
-                    
-                    # If pixmap is very small, we might want to not scale it too much
-                    # Calculate scale to fit within label while keeping aspect ratio
-                    width_ratio = label_size.width() / pixmap_size.width()
-                    height_ratio = label_size.height() / pixmap_size.height()
-                    
-                    # Use the smaller ratio to ensure image fits completely (不会超出边界)
-                    scale_factor = min(width_ratio, height_ratio)
-                    
-                    # Optionally, you can set a maximum scale factor to prevent pixelation
-                    # For example, don't scale up small images too much
-                    max_scale = 2.0  # Maximum 2x enlargement
-                    if scale_factor > max_scale:
-                        scale_factor = max_scale
-                    
-                    # Calculate new size
-                    new_width = int(pixmap_size.width() * scale_factor)
-                    new_height = int(pixmap_size.height() * scale_factor)
-                    
-                    # Ensure minimum dimensions
-                    if new_width < 50:  # Don't make it too small
-                        new_width = 50
-                        scale_factor = new_width / pixmap_size.width()
-                        new_height = int(pixmap_size.height() * scale_factor)
-                    
-                    # Scale the pixmap with smooth transformation
-                    scaled_pixmap = pixmap.scaled(
-                        new_width, new_height,
-                        Qt.AspectRatioMode.KeepAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation
-                    )
-                    
-                    # Set pixmap and center it
-                    self.cover_label.setPixmap(scaled_pixmap)
-                    self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                    
-                    # Update label size to match scaled pixmap (optional)
-                    # self.cover_label.setFixedSize(new_width, new_height)
-                    
+                    self.display_cover_pixmap(pixmap)
                     return
                 else:
-                    # No pixmap available
                     self.show_no_cover_state()
         
         except Exception as e:
             print(f"Error loading cover image: {e}")
             self.show_error_state()
+
+    def display_cover_pixmap(self, pixmap):
+        """Display a pixmap in the cover label with proper scaling"""
+        # Remove any text styling
+        self.cover_label.setStyleSheet("")
+        
+        # Get label size (minimum 240x240)
+        label_size = self.cover_label.size()
+        
+        # Ensure minimum size
+        if label_size.width() < 240:
+            label_size.setWidth(240)
+        if label_size.height() < 240:
+            label_size.setHeight(240)
+        
+        pixmap_size = pixmap.size()
+        
+        # Calculate scale to fit while keeping aspect ratio
+        width_ratio = label_size.width() / pixmap_size.width()
+        height_ratio = label_size.height() / pixmap_size.height()
+        
+        # Use the smaller ratio to ensure image fits completely
+        scale_factor = min(width_ratio, height_ratio)
+        
+        # Don't scale up too much if the source image is small
+        max_scale = 2.0
+        if scale_factor > max_scale:
+            scale_factor = max_scale
+        
+        # Calculate new size
+        new_width = int(pixmap_size.width() * scale_factor)
+        new_height = int(pixmap_size.height() * scale_factor)
+        
+        # Ensure minimum dimensions
+        if new_width < 50:
+            new_width = 50
+            scale_factor = new_width / pixmap_size.width()
+            new_height = int(pixmap_size.height() * scale_factor)
+        
+        # Scale if needed
+        if scale_factor != 1.0:
+            scaled_pixmap = pixmap.scaled(
+                new_width, new_height,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+            self.cover_label.setPixmap(scaled_pixmap)
+        else:
+            self.cover_label.setPixmap(pixmap)
+        
+        self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
     def show_no_cover_state(self):
         """Show state when no cover is available"""

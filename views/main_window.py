@@ -17,6 +17,9 @@ import re
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+
+        # Set window title
+        self.setWindowTitle("LB Manager")
         
         # Set default window size before restoring state
         self.resize(1200, 700)  # Larger default size

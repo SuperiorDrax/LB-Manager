@@ -298,11 +298,25 @@ class WebController:
         
         dialog.exec()
 
-    def get_cover_image(self, websign):
-        """Get cover image for websign"""
+    def get_cover_image(self, websign, size=None):
+        """
+        Get cover image for websign with optional size
+        
+        Args:
+            websign: Comic identifier
+            size: Optional (width, height) for scaling
+        
+        Returns:
+            QPixmap of the cover image
+        """
         try:
+            # Create cache key that includes size
+            if size:
+                cache_key = f"{websign}_{size[0]}x{size[1]}"
+            else:
+                cache_key = f"{websign}_original"
+            
             # Check cache first
-            cache_key = str(websign)
             if cache_key in self.cover_cache:
                 return self.cover_cache[cache_key]
             
@@ -311,13 +325,13 @@ class WebController:
             if not zip_path:
                 return None
             
-            # Extract cover image
+            # Extract cover image with specified size
             from models.zip_image_manager import ZipImageManager
             zip_manager = ZipImageManager()
-            cover_pixmap = zip_manager.extract_cover_image(zip_path)
+            cover_pixmap = zip_manager.extract_cover_image(zip_path, size)
             
             if cover_pixmap:
-                # Add to cache (with basic cache management)
+                # Cache management
                 if len(self.cover_cache) >= self.max_cache_size:
                     # Remove oldest entry (simple FIFO)
                     oldest_key = next(iter(self.cover_cache))
@@ -326,7 +340,7 @@ class WebController:
                 self.cover_cache[cache_key] = cover_pixmap
             
             return cover_pixmap
-            
+                
         except Exception as e:
             print(f"Error getting cover image for {websign}: {e}")
             return None

@@ -7,8 +7,16 @@ from views.main_window import MainWindow
 def main():
     app = QApplication(sys.argv)
     
-    # Set application-wide icon (affects taskbar and window)
-    app.setWindowIcon(QIcon("icon.png"))
+    # Set application name (affects window title on some systems)
+    app.setApplicationName("LB Manager")
+    app.setApplicationDisplayName("LB Manager")
+    
+    # Set application-wide icon
+    # Note: Use absolute path or ensure icon.png is in the same directory
+    try:
+        app.setWindowIcon(QIcon("icon.png"))
+    except:
+        print("Icon file not found, using default icon")
     
     window = MainWindow()
     window.show()

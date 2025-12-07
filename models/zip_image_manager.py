@@ -531,13 +531,24 @@ class ZipImageManager(QObject):
             traceback.print_exc()
             return False
 
-    def extract_cover_image(self, zip_path, size=(150, 200)):
-        """Extract first image from ZIP as cover thumbnail"""
+    def extract_cover_image(self, zip_path, size=None):
+        """
+        Extract first image from ZIP as cover
+        
+        Args:
+            zip_path: Path to ZIP file
+            size: Optional tuple (width, height) for scaling. 
+                If None, returns original size.
+                If provided, scales to fit within size while keeping aspect ratio.
+        
+        Returns:
+            QPixmap of the cover image
+        """
         try:
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 # Get image files sorted by name
                 image_files = [f for f in zip_ref.namelist() 
-                             if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp'))]
+                            if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp'))]
                 
                 if not image_files:
                     return None
@@ -545,22 +556,29 @@ class ZipImageManager(QObject):
                 # Get first image file
                 first_image = sorted(image_files)[0]
                 
-                # Read and resize image
+                # Read image data
                 with zip_ref.open(first_image) as image_file:
                     image_data = image_file.read()
-                    
+                
                 # Create QPixmap from image data
                 image = QImage()
-                image.loadFromData(image_data)
+                if not image.loadFromData(image_data):
+                    return None
                 
-                # Scale image to thumbnail size while keeping aspect ratio
                 pixmap = QPixmap.fromImage(image)
-                scaled_pixmap = pixmap.scaled(size[0], size[1], 
-                                            Qt.AspectRatioMode.KeepAspectRatio,
-                                            Qt.TransformationMode.SmoothTransformation)
                 
-                return scaled_pixmap
-                
+                # Only scale if size is specified
+                if size:
+                    # Use KeepAspectRatio to fit within size without cropping
+                    scaled_pixmap = pixmap.scaled(
+                        size[0], size[1], 
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation
+                    )
+                    return scaled_pixmap
+                else:
+                    return pixmap  # Return original size
+                    
         except Exception as e:
             print(f"Error extracting cover from {zip_path}: {e}")
             return None
