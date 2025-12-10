@@ -172,3 +172,17 @@ class ConfigManager:
             self.config.add_section('WindowState')
         self.config.set('WindowState', 'detail_panel_width', str(width))
         self.save_config()
+
+    def get_view_mode(self):
+        """Get preferred view mode"""
+        try:
+            return self.config.get('ViewSettings', 'view_mode', fallback='table')
+        except:
+            return 'table'
+
+    def set_view_mode(self, mode):
+        """Set preferred view mode"""
+        if not self.config.has_section('ViewSettings'):
+            self.config.add_section('ViewSettings')
+        self.config.set('ViewSettings', 'view_mode', mode)
+        self.save_config()

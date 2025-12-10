@@ -126,16 +126,10 @@ class Sidebar(QWidget):
                 padding: 8px 12px;
                 border: 1px solid #bdc3c7;
                 border-radius: 4px;
-                background-color: #ecf0f1;
-                color: #2c3e50;
             }
             QPushButton:checked {
-                background-color: #3498db;
                 color: #2c3e50;
                 border: 1px solid #2980b9;
-            }
-            QPushButton:hover:!checked {
-                background-color: #d5dbdb;
             }
         """)
         

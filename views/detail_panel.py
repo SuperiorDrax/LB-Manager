@@ -100,13 +100,6 @@ class DetailPanel(QWidget):
         # Cover container - larger fixed height, full width
         cover_container = QFrame()
         cover_container.setFixedHeight(260)  # Larger fixed height
-        cover_container.setStyleSheet("""
-            QFrame {
-                background-color: #f5f7fa;
-                border: 1px solid #dee2e6;
-                border-radius: 4px;
-            }
-        """)
         
         # Container layout - full width, centered
         container_layout = QHBoxLayout(cover_container)
@@ -125,12 +118,6 @@ class DetailPanel(QWidget):
         # Default placeholder
         self.cover_label.setText("No cover")
         self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.cover_label.setStyleSheet("""
-            QLabel {
-                color: #6c757d;
-                font-style: italic;
-            }
-        """)
         
         container_layout.addWidget(self.cover_label)
         section_layout.addWidget(cover_container)
@@ -163,31 +150,6 @@ class DetailPanel(QWidget):
         
         # Set column widths
         self.info_table.setColumnWidth(0, 80)
-        
-        # Set improved style with darker background
-        self.info_table.setStyleSheet("""
-            QTableWidget {
-                background-color: #f8f9fa;  /* Light gray background instead of white */
-                border: 1px solid #dee2e6;
-                border-radius: 4px;
-                color: #212529;  /* Dark text color */
-            }
-            QTableWidget::item {
-                padding: 6px 8px;
-                color: #212529;  /* Ensure text is dark */
-            }
-            QTableWidget::item:alternate {
-                background-color: #e9ecef;  /* Slightly darker for alternating rows */
-            }
-            QHeaderView::section {
-                background-color: #e9ecef;  /* Header background */
-                padding: 8px;
-                border: none;
-                border-bottom: 1px solid #dee2e6;
-                color: #495057;  /* Darker header text */
-                font-weight: bold;
-            }
-        """)
         
         section_layout.addWidget(self.info_table)
         section_widget.setLayout(section_layout)

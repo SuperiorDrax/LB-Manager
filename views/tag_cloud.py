@@ -136,27 +136,19 @@ class TagCloud(QWidget):
         if is_selected:
             style = f"""
                 QPushButton {{
-                    background-color: #3498db;
-                    color: white;
                     border: 1px solid #2980b9;
                     border-radius: 12px;
                     padding: 4px 12px;
-                }}
-                QPushButton:hover {{
-                    background-color: #2980b9;
                 }}
             """
         else:
             style = f"""
                 QPushButton {{
-                    background-color: #ecf0f1;
-                    color: #2c3e50;
                     border: 1px solid #bdc3c7;
                     border-radius: 12px;
                     padding: 4px 12px;
                 }}
                 QPushButton:hover {{
-                    background-color: #d5dbdb;
                     border: 1px solid #95a5a6;
                 }}
             """

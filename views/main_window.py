@@ -1,4 +1,7 @@
-from PyQt6.QtWidgets import QSplitter, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QPushButton, QMessageBox, QMenu, QDialog, QTableWidgetItem
+from PyQt6.QtWidgets import (QSplitter, QMainWindow, QWidget, 
+                             QVBoxLayout, QHBoxLayout, QTableWidget, 
+                             QPushButton, QMessageBox, QMenu, QDialog, 
+                             QTableWidgetItem, QTabBar, QStackedWidget)
 from PyQt6.QtCore import Qt, QTimer
 from views.detail_panel import DetailPanel
 from models.config_manager import ConfigManager
@@ -11,6 +14,7 @@ from controllers.web_controller import WebController
 from controllers.table_visual_manager import TableVisualManager
 from views.enhanced_table import EnhancedTableWidget
 from views.sidebar import Sidebar
+from views.grid_view import GridView
 import os
 import re
 
@@ -22,7 +26,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("LB Manager")
         
         # Set default window size before restoring state
-        self.resize(1200, 700)  # Larger default size
+        self.resize(1150, 700)  # Larger default size
         
         # Initialize managers and controllers
         self.config_manager = ConfigManager()
@@ -40,6 +44,9 @@ class MainWindow(QMainWindow):
         self.jm_website_value = self.config_manager.get_jm_website()
         self.dist_website_value = self.config_manager.get_dist_website()
         self.lib_path_value = self.config_manager.get_lib_path()
+
+        # Initialize detail panel
+        self.detail_panel = DetailPanel(self)
         
         # Restore window state (may override default size)
         self.state_manager.restore_window_state()
@@ -57,12 +64,16 @@ class MainWindow(QMainWindow):
         # Initialize sidebar
         self.sidebar = Sidebar(self)
         self.sidebar.tag_filter_changed.connect(self.apply_tag_filter)
+
+        # Initialize grid view
+        self.grid_view = GridView(self)
         
         self.init_ui()
 
         self.table_controller.rebuild_websign_tracker()
         self.table_controller.data_added.connect(self.update_sidebar_counts)
         self.table_controller.filter_state_changed.connect(self.on_filter_state_changed)
+        self.grid_view.selection_changed.connect(self.on_grid_selection_changed)
     
     def init_ui(self):
         """Initialize UI with sidebar and menu bar"""
@@ -80,16 +91,50 @@ class MainWindow(QMainWindow):
 
         # Create splitter for resizable panels
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
-
-        # Add sidebar
+        
+        # Add sidebar (fixed width initially)
         self.main_splitter.addWidget(self.sidebar)
-
-        # Create middle container for table
+        
+        # Create middle container for view switching
         middle_container = QWidget()
         middle_layout = QVBoxLayout()
-        middle_layout.setContentsMargins(10, 10, 10, 10)
-        middle_layout.setSpacing(10)
-
+        middle_layout.setContentsMargins(0, 0, 0, 0)
+        middle_layout.setSpacing(0)
+        
+        # Create view tab bar
+        self.view_tab_bar = QTabBar()
+        self.view_tab_bar.addTab("📊 Table View")
+        self.view_tab_bar.addTab("🖼️ Grid View")
+        self.view_tab_bar.setExpanding(False)
+        self.view_tab_bar.currentChanged.connect(self.switch_view)
+        
+        # Set tab bar style
+        self.view_tab_bar.setStyleSheet("""
+            QTabBar::tab {
+                padding: 8px 16px;
+                border: 1px solid #dee2e6;
+                border-bottom: none;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+                margin-right: 2px;
+            }
+            QTabBar::tab:selected {
+                border-bottom: 2px solid #2196f3;
+                font-weight: bold;
+            }
+        """)
+        
+        middle_layout.addWidget(self.view_tab_bar)
+        
+        # Create stacked widget for views
+        self.view_stack = QStackedWidget()
+        
+        # Create table view container (existing structure)
+        table_container = QWidget()
+        table_layout = QVBoxLayout()
+        table_layout.setContentsMargins(10, 10, 10, 10)
+        table_layout.setSpacing(10)
+        
         # Create table using enhanced version
         self.table = EnhancedTableWidget()
         self.table.setColumnCount(11)
@@ -98,35 +143,39 @@ class MainWindow(QMainWindow):
         ])
         
         # Set column widths
-        self.table.setColumnWidth(0, 80)   # websign
-        self.table.setColumnWidth(1, 120)  # author
-        self.table.setColumnWidth(2, 200)  # title
-        self.table.setColumnWidth(3, 100)  # group
-        self.table.setColumnWidth(4, 100)  # show
-        self.table.setColumnWidth(5, 120)  # magazine
-        self.table.setColumnWidth(6, 120)  # origin
-        self.table.setColumnWidth(7, 150)  # tag
-        self.table.setColumnWidth(8, 80)   # read_status
-        self.table.setColumnWidth(9, 80)   # progress
-        self.table.setColumnWidth(10, 100)   # file_path
+        self.table.setColumnWidth(0, 80)
+        self.table.setColumnWidth(1, 120)
+        self.table.setColumnWidth(2, 200)
+        self.table.setColumnWidth(3, 100)
+        self.table.setColumnWidth(4, 100)
+        self.table.setColumnWidth(5, 120)
+        self.table.setColumnWidth(6, 120)
+        self.table.setColumnWidth(7, 150)
+        self.table.setColumnWidth(8, 80)
+        self.table.setColumnWidth(9, 80)
+        self.table.setColumnWidth(10, 100)
 
         # Hide file_path column by default
         self.table.setColumnHidden(10, True)
         
-        # Enable other table features
+        # Enable table features
         self.table.setSortingEnabled(True)
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.table.customContextMenuRequested.connect(self.show_context_menu)
-
-        # Connect double-click signal
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
+        
+        # Connect table signals
         self.table.doubleClicked.connect(self.on_table_double_click)
-
-        # Connect selection change signal
         self.table.itemSelectionChanged.connect(self.on_table_selection_changed)
-
-        # Create buttons
+        
+        # Connect column signals
+        self.table.horizontalHeader().setSectionsMovable(True)
+        self.table.horizontalHeader().setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.horizontalHeader().customContextMenuRequested.connect(self.visual_manager.show_header_context_menu)
+        self.table.horizontalHeader().sectionResized.connect(self.state_manager.on_column_resized)
+        self.table.horizontalHeader().sectionMoved.connect(self.state_manager.on_column_moved)
+        
+        # Create buttons for table view
         button_layout = QHBoxLayout()
         self.search_button = QPushButton("Search")
         self.search_button.setToolTip("Search (Ctrl+F)")
@@ -134,21 +183,28 @@ class MainWindow(QMainWindow):
         
         button_layout.addWidget(self.search_button)
         button_layout.addWidget(self.clear_button)
-        button_layout.addStretch()  # Add stretch to push buttons to left
-
-        # Add table and buttons to middle layout
-        middle_layout.addWidget(self.table)
-        middle_layout.addLayout(button_layout)
-
+        button_layout.addStretch()
+        
+        # Add table and buttons to table layout
+        table_layout.addWidget(self.table)
+        table_layout.addLayout(button_layout)
+        
+        table_container.setLayout(table_layout)
+        
+        # Add views to stack
+        self.view_stack.addWidget(table_container)
+        self.view_stack.addWidget(self.grid_view)
+        
+        middle_layout.addWidget(self.view_stack)
         middle_container.setLayout(middle_layout)
         self.main_splitter.addWidget(middle_container)
-
+        
         # Add detail panel
         self.main_splitter.addWidget(self.detail_panel)
-
-        # Set initial splitter sizes (sidebar: 220, middle: rest, detail: 300)
-        self.main_splitter.setSizes([220, 500, 300])
-
+        
+        # Set initial splitter sizes (will be overridden by state manager)
+        self.main_splitter.setSizes([220, 600, 300])
+        
         # Set splitter handle style
         self.main_splitter.setHandleWidth(1)
         self.main_splitter.setStyleSheet("""
@@ -159,47 +215,26 @@ class MainWindow(QMainWindow):
                 background-color: #95a5a6;
             }
         """)
-
-        # Add splitter to main layout
+        
         main_layout.addWidget(self.main_splitter)
         central_widget.setLayout(main_layout)
-
-        # Add filter state tracking
-        self.is_filtered = False
-        self.original_row_visibility = [] # Store original row visibility state
-
-        central_widget.setLayout(main_layout)
-
-        # Enable sorting and column dragging
-        self.table.setSortingEnabled(True)
-        self.table.setAlternatingRowColors(True)
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.table.customContextMenuRequested.connect(self.show_context_menu)
-        
-        # Enable column reordering and header context menu
-        self.table.horizontalHeader().setSectionsMovable(True)
-        self.table.horizontalHeader().setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.table.horizontalHeader().customContextMenuRequested.connect(self.visual_manager.show_header_context_menu)
         
         # Connect signals
-        self.table.horizontalHeader().sectionResized.connect(self.state_manager.on_column_resized)
-        self.table.horizontalHeader().sectionMoved.connect(self.state_manager.on_column_moved)
         self.search_button.clicked.connect(self.show_search_dialog)
         self.clear_button.clicked.connect(self.clear_table)
-
+        
         # Connect sidebar signals
         self.sidebar.status_filter_changed.connect(self.apply_status_filter)
         self.sidebar.filter_reset.connect(self.reset_table_filter)
-
-        # Install event filter
+        
+        # Install event filter for context menu
         self.table.viewport().installEventFilter(self)
         
-        # Remove original context menu policy, use event filter instead
-        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
-
         # Update sidebar counts initially
         self.update_sidebar_counts()
+        
+        # Load saved view preference
+        self.load_view_preference()
     
     def create_menu_bar(self):
         menu_bar = self.menuBar()
@@ -232,6 +267,75 @@ class MainWindow(QMainWindow):
         help_menu = menu_bar.addMenu("Help")
         about_action = help_menu.addAction("About")
         about_action.triggered.connect(self.show_about_dialog)
+
+    def switch_view(self, index):
+        """Switch between table and grid view"""
+        if index == 0:  # Table view
+            self.view_stack.setCurrentIndex(0)
+            # Sync selection from grid to table
+            grid_selected = self.grid_view.get_selected_rows()
+            if grid_selected:
+                self.sync_selection_to_table(grid_selected)
+        else:  # Grid view
+            self.view_stack.setCurrentIndex(1)
+            # Refresh grid to ensure it's up to date
+            self.grid_view.refresh_grid()
+            # Sync selection from table to grid
+            table_selected = self.get_selected_rows()
+            if table_selected:
+                self.grid_view.selected_rows = set(table_selected)
+                self.grid_view.update_selection_visuals()
+        
+        # Save view preference
+        self.save_view_preference(index)
+
+    def sync_selection_to_table(self, selected_rows):
+        """Sync selection from grid to table"""
+        self.table.clearSelection()
+        for row in selected_rows:
+            if row < self.table.rowCount():
+                for col in range(self.table.columnCount()):
+                    item = self.table.item(row, col)
+                    if item:
+                        item.setSelected(True)
+
+    def on_grid_selection_changed(self):
+        """Handle grid view selection changes"""
+        # Get selected rows from grid
+        selected_rows = self.grid_view.get_selected_rows()
+        
+        # Update detail panel
+        if not selected_rows:
+            self.detail_panel.show_empty_state()
+        elif len(selected_rows) > 1:
+            self.detail_panel.show_multiple_selection_state(len(selected_rows))
+            if selected_rows:
+                row_data = self.get_row_data(selected_rows[0])
+                self.detail_panel.update_details(row_data)
+        else:
+            row_data = self.get_row_data(selected_rows[0])
+            self.detail_panel.update_details(row_data)
+
+    def load_view_preference(self):
+        """Load saved view preference from config"""
+        try:
+            view_mode = self.config_manager.get_view_mode()
+            if view_mode == "grid":
+                self.view_tab_bar.setCurrentIndex(1)
+                self.view_stack.setCurrentIndex(1)
+            else:
+                self.view_tab_bar.setCurrentIndex(0)
+                self.view_stack.setCurrentIndex(0)
+        except:
+            # Default to table view
+            self.view_tab_bar.setCurrentIndex(0)
+            self.view_stack.setCurrentIndex(0)
+
+    def save_view_preference(self, index):
+        """Save view preference to config"""
+        view_mode = "grid" if index == 1 else "table"
+        # Need to add this method to config_manager
+        self.config_manager.set_view_mode(view_mode)
 
     def show_about_dialog(self):
         """Show about information"""
@@ -378,6 +482,8 @@ class MainWindow(QMainWindow):
             self.update_sidebar_counts()
             # Clear detail panel
             self.detail_panel.show_empty_state()
+            # Refresh grid view
+            self.grid_view.refresh_grid()
     
     def fetch_zip_numbers(self, lib_path):
         """Recursively scan directory and extract integers from ZIP filenames"""

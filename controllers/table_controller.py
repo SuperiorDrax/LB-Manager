@@ -19,9 +19,31 @@ class TableController(QObject):
         self.last_search_options = None
     
     def add_to_table(self, data):
-        """Add parsed data to table with tag support"""
-        author, title, group, show, magazine, origin, websign, tag, read_status, progress = data
-        file_path = ""
+        """Add parsed data to table with tag support - handles 7, 8, or 10 parameters"""
+        # Handle variable parameter count with defaults
+        if len(data) == 7:
+            # Format: author, title, group, show, magazine, origin, websign
+            author, title, group, show, magazine, origin, websign = data
+            tag = ""  # Default empty tag
+            read_status = "unread"  # Default unread status
+            progress = 0  # Default 0% progress
+            file_path = ""  # Default empty file path
+        elif len(data) == 8:
+            # Format: author, title, group, show, magazine, origin, websign, tag
+            author, title, group, show, magazine, origin, websign, tag = data
+            read_status = "unread"  # Default unread status
+            progress = 0  # Default 0% progress
+            file_path = ""  # Default empty file path
+        elif len(data) == 10:
+            # Full format: author, title, group, show, magazine, origin, websign, tag, read_status, progress
+            author, title, group, show, magazine, origin, websign, tag, read_status, progress = data
+            file_path = "" # Default empty file path
+        elif len(data) == 11:
+            # Full format: author, title, group, show, magazine, origin, websign, tag, read_status, progress
+            author, title, group, show, magazine, origin, websign, tag, read_status, progress, file_path = data
+        else:
+            print(f"Warning: Unexpected data length: {len(data)} elements")
+            return
 
         table = self.main_window.table
         
