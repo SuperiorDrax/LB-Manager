@@ -2,6 +2,7 @@ from PyQt6.QtWidgets import QTableWidgetItem, QMessageBox
 from PyQt6.QtCore import Qt, QObject, pyqtSignal
 from PyQt6.QtGui import QColor, QBrush
 import re
+import os
 
 class TableController(QObject):
     data_added = pyqtSignal()
@@ -44,6 +45,9 @@ class TableController(QObject):
         else:
             print(f"Warning: Unexpected data length: {len(data)} elements")
             return
+        
+        # Process file_path
+        processed_file_path = self.process_file_path(websign, file_path)
 
         table = self.main_window.table
         
@@ -69,8 +73,8 @@ class TableController(QObject):
         progress_item = QTableWidgetItem(f"{progress}%")
         progress_item.setData(Qt.ItemDataRole.UserRole, progress)
 
-        # Create file path item (empty by default)
-        file_path_item = QTableWidgetItem(file_path)
+        # Create file path item with processed path
+        file_path_item = QTableWidgetItem(processed_file_path)
         
         # Set data in table - now 8 columns
         table.setItem(row_position, 0, websign_item)                 # websign
@@ -93,6 +97,75 @@ class TableController(QObject):
             self.highlight_duplicate_rows(websign)
         
         self.data_added.emit()
+
+    def process_file_path(self, websign, original_file_path):
+        """
+        Process file path: convert to relative, validate, search if needed
+        Returns processed relative file path or empty string
+        """
+        # Get lib_path from web_controller
+        lib_path = self.main_window.web_controller.lib_path_value
+        
+        if not lib_path:
+            # No library path set, cannot process
+            return original_file_path  # Return as is
+        
+        # If original file path is provided
+        if original_file_path and original_file_path.strip():
+            return self._validate_and_convert_path(websign, original_file_path.strip(), lib_path)
+        else:
+            # No file path provided, search for it
+            return self._search_for_file(websign, lib_path)
+
+    def _validate_and_convert_path(self, websign, file_path, lib_path):
+        """Validate file path and convert to relative if needed"""
+        # Check if it's absolute or relative
+        if os.path.isabs(file_path):
+            # Convert absolute path to relative path
+            try:
+                relative_path = os.path.relpath(file_path, lib_path)
+                # Check if the file exists
+                if os.path.exists(file_path):
+                    return relative_path
+                else:
+                    # File doesn't exist, ask user
+                    return self._handle_missing_file_batch(websign, file_path, lib_path)
+            except ValueError:
+                # Paths are on different drives, cannot make relative
+                return self._handle_missing_file_batch(websign, file_path, lib_path)
+        else:
+            # Already relative path
+            full_path = os.path.join(lib_path, file_path)
+            if os.path.exists(full_path):
+                return file_path
+            else:
+                return self._handle_missing_file_batch(websign, full_path, lib_path)
+
+    def _search_for_file(self, websign, lib_path):
+        """Search for ZIP file by websign in library directory"""
+        from utils.file_locator import FileLocator
+        
+        try:
+            locator = FileLocator(max_depth=3)
+            found_path = locator.find_zip_by_websign(websign, lib_path)
+            
+            if found_path:
+                # Convert to relative path
+                relative_path = os.path.relpath(found_path, lib_path)
+                return relative_path
+            else:
+                return ""  # Not found
+        except Exception as e:
+            print(f"Error searching for file {websign}: {e}")
+            return ""
+
+    def _handle_missing_file_batch(self, websign, expected_path, lib_path):
+        """
+        Handle missing file in batch mode - always search
+        (For interactive mode, would show dialog)
+        """
+        # In batch import, always try to search for the file
+        return self._search_for_file(websign, lib_path)
 
     def apply_search_filter(self, options):
         """Apply search filter with undo capability"""

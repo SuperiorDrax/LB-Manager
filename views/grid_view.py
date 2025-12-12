@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QFrame, QScrollArea, QGridLayout, QSizePolicy,
-                             QApplication)
+                             QPushButton, QApplication)
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor, QFont
 
@@ -10,10 +10,12 @@ class ComicCard(QFrame):
     clicked = pyqtSignal(int)  # Emits row index when clicked
     double_clicked = pyqtSignal(int)  # Emits row index when double-clicked
     
-    def __init__(self, row_index, comic_data, parent=None):
+    def __init__(self, row_index, comic_data, main_window, parent=None):
         super().__init__(parent)
         self.row_index = row_index
         self.comic_data = comic_data
+        self.main_window = main_window
+        self.is_loading_cover = False
         self.is_selected = False
         
         self.setFixedSize(140, 250)  # Fixed card size
@@ -25,6 +27,9 @@ class ComicCard(QFrame):
         
         # Enable mouse tracking
         self.setMouseTracking(True)
+
+        # Delayed cover loading
+        QTimer.singleShot(100, self.load_cover_image)
     
     def init_ui(self):
         """Initialize card UI"""
@@ -122,24 +127,85 @@ class ComicCard(QFrame):
         self.load_cover_image()
 
     def load_cover_image(self):
-        """Load cover image for this comic"""
+        """Load cover image for this comic card with proper lifecycle handling"""
+        # Check if card is still valid and visible
+        if not self.isVisible() or not self.parent():
+            return
+        
+        # Get websign from comic data
         websign = self.comic_data.get('websign', '')
-        if websign and hasattr(self.parent(), 'main_window'):
-            # Request appropriately sized cover for grid card
-            pixmap = self.parent().main_window.web_controller.get_cover_image(websign)
+        if not websign:
+            self.show_no_cover()
+            return
+        
+        try:
+            # Check if we have main_window reference
+            if not hasattr(self, 'main_window') or not self.main_window:
+                self.show_no_cover()
+                return
+            
+            # Get cover image from web controller
+            pixmap = self.main_window.web_controller.get_cover_image(
+                websign, 
+                size=(130, 150)  # Size appropriate for grid cards
+            )
+            
+            # Check if card still exists before setting pixmap
+            if not self.isVisible() or not self.parent():
+                return  # Card was destroyed while loading
+            
             if pixmap and not pixmap.isNull():
-                # Scale to fit the cover label
+                # Scale pixmap to fit label while keeping aspect ratio
+                label_size = self.cover_label.size()
+                pixmap_size = pixmap.size()
+                
+                # Calculate scale to fit
+                width_ratio = label_size.width() / pixmap_size.width()
+                height_ratio = label_size.height() / pixmap_size.height()
+                scale_factor = min(width_ratio, height_ratio)
+                
+                # Calculate new size
+                new_width = int(pixmap_size.width() * scale_factor)
+                new_height = int(pixmap_size.height() * scale_factor)
+                
+                # Scale with smooth transformation
                 scaled_pixmap = pixmap.scaled(
-                    self.cover_label.size(),
+                    new_width, new_height,
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation
                 )
+                
+                # Set pixmap and clear any placeholder text
                 self.cover_label.setPixmap(scaled_pixmap)
-                return
-        
-        # If no cover available, show placeholder
-        self.cover_label.setText("No Cover")
-        self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.cover_label.setText("")
+                self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            else:
+                # No pixmap available
+                self.show_no_cover()
+                
+        except AttributeError as e:
+            # Handle missing attributes (e.g., web_controller not available)
+            print(f"Attribute error loading cover for {websign}: {e}")
+            self.show_no_cover()
+        except Exception as e:
+            # Handle any other errors
+            print(f"Error loading cover for {websign}: {e}")
+            self.show_no_cover()
+
+    def show_no_cover(self):
+        """Show 'No cover' placeholder"""
+        if self.isVisible():
+            self.cover_label.clear()
+            self.cover_label.setText("No cover")
+            self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.cover_label.setStyleSheet("color: #6c757d; font-style: italic;")
+
+    def deleteLater(self):
+        """Override to handle pending cover loads"""
+        if self.is_loading_cover:
+            # Cancel pending load
+            self.is_loading_cover = False
+        super().deleteLater()
     
     def set_selected(self, selected):
         """Update selection state"""
@@ -203,6 +269,9 @@ class GridView(QWidget):
         self.selected_rows = set()
         self.cards = {}  # row_index -> ComicCard
         self.last_clicked_row = -1
+        self.current_page = 0
+        self.page_size = 20
+        self.total_pages = 0
         
         self.init_ui()
         self.connect_signals()
@@ -229,6 +298,25 @@ class GridView(QWidget):
         main_layout.addWidget(scroll_area)
         
         self.setLayout(main_layout)
+
+        # Add pagination controls
+        self.pagination_widget = QWidget()
+        pagination_layout = QHBoxLayout()
+        
+        self.prev_button = QPushButton("◀ Previous")
+        self.page_label = QLabel("Page 1 of 1")
+        self.next_button = QPushButton("Next ▶")
+        
+        pagination_layout.addWidget(self.prev_button)
+        pagination_layout.addWidget(self.page_label)
+        pagination_layout.addWidget(self.next_button)
+        
+        self.pagination_widget.setLayout(pagination_layout)
+        main_layout.addWidget(self.pagination_widget)
+        
+        # Connect signals
+        self.prev_button.clicked.connect(self.prev_page)
+        self.next_button.clicked.connect(self.next_page)
     
     def connect_signals(self):
         """Connect to main window signals"""
@@ -255,30 +343,46 @@ class GridView(QWidget):
             if not self.main_window.table.isRowHidden(row):
                 visible_rows.append(row)
         
-        # Create cards for visible rows
-        columns = 4  # Fixed number of columns
-        for i, row in enumerate(visible_rows):
-            # Get row data
-            row_data = self.main_window.get_row_data(row)
-            
-            # Create card
-            card = ComicCard(row, row_data, self)
-            card.clicked.connect(self.on_card_clicked)
-            card.double_clicked.connect(self.on_card_double_clicked)
-            
-            # Add to grid
-            row_pos = i // columns
-            col_pos = i % columns
-            self.grid_layout.addWidget(card, row_pos, col_pos)
-            
-            # Store reference
-            self.cards[row] = card
-            
-            # Update selection state
-            card.set_selected(row in self.selected_rows)
+        # Calculate pagination
+        self.total_rows = len(visible_rows)
+        self.total_pages = max(1, (self.total_rows + self.page_size - 1) // self.page_size)
+
+        # Ensure current page is valid
+        self.current_page = min(self.current_page, self.total_pages - 1)
+
+        # Get data for current page
+        start_idx = self.current_page * self.page_size
+        end_idx = min(start_idx + self.page_size, self.total_rows)
+        current_page_rows = visible_rows[start_idx:end_idx]
         
-        # Update container size
-        self.grid_container.adjustSize()
+        # Create cards for visible rows
+        for i, row in enumerate(current_page_rows):
+            row_data = self.main_window.get_row_data(row)
+            card = ComicCard(row, row_data, self.main_window, self)
+            
+            row_pos = i // 4  # 4-column layout
+            col_pos = i % 4
+            self.grid_layout.addWidget(card, row_pos, col_pos)
+            self.cards[row] = card
+
+            # Set selection state
+            card.set_selected(row in self.selected_rows)
+
+            # Load cover AFTER card is fully set up
+            QTimer.singleShot(100 * i, card.load_cover_image)  # Stagger the loading
+        
+        # Connect signals AFTER all cards are created
+        QTimer.singleShot(50, self._connect_card_signals)
+
+        # Update pagination display
+        self.update_pagination_display()
+
+    def _connect_card_signals(self):
+        """Connect signals after cards are fully initialized"""
+        for row, card in self.cards.items():
+            if card:  # Check if card still exists
+                card.clicked.connect(self.on_card_clicked)
+                card.double_clicked.connect(self.on_card_double_clicked)
     
     def on_card_clicked(self, row):
         """Handle card click for selection"""
@@ -375,3 +479,73 @@ class GridView(QWidget):
     def get_selected_rows(self):
         """Get currently selected rows in grid"""
         return sorted(list(self.selected_rows))
+
+    def next_page(self):
+        """Go to next page and preload the page after"""
+        if self.current_page < self.total_pages - 1:
+            self.current_page += 1
+            self.refresh_grid()
+            
+            # Preload next page after showing current one
+            QTimer.singleShot(100, self.preload_next_page)
+
+    def prev_page(self):
+        """Go to previous page and preload the page before"""
+        if self.current_page > 0:
+            self.current_page -= 1
+            self.refresh_grid()
+            QTimer.singleShot(100, self.preload_prev_page)
+
+    def update_pagination_display(self):
+        """Update pagination controls"""
+        self.page_label.setText(f"Page {self.current_page + 1} of {self.total_pages}")
+        self.prev_button.setEnabled(self.current_page > 0)
+        self.next_button.setEnabled(self.current_page < self.total_pages - 1)
+
+    def preload_next_page(self):
+        """Preload covers for next page in background"""
+        if self.current_page >= self.total_pages - 1:
+            return  # No next page
+        
+        next_page_num = self.current_page + 1
+        visible_rows = self.get_all_visible_rows()
+        start_idx = next_page_num * self.page_size
+        end_idx = min(start_idx + self.page_size, len(visible_rows))
+        next_page_rows = visible_rows[start_idx:end_idx]
+        
+        # Preload covers for next page in background
+        for row in next_page_rows:
+            websign = self.main_window.get_cell_text(row, 0)  # Get websign
+            if websign:
+                # Request cover to cache it
+                self.main_window.web_controller.get_cover_image(
+                    websign, 
+                    size=(130, 150)  # Appropriate size for grid cards
+                )
+
+    def get_all_visible_rows(self):
+        """Get all visible row indices from table"""
+        visible_rows = []
+        for row in range(self.main_window.table.rowCount()):
+            if not self.main_window.table.isRowHidden(row):
+                visible_rows.append(row)
+        return visible_rows
+
+    def preload_prev_page(self):
+        """Preload covers for previous page"""
+        if self.current_page <= 0:
+            return
+        
+        prev_page_num = self.current_page - 1
+        visible_rows = self.get_all_visible_rows()
+        start_idx = prev_page_num * self.page_size
+        end_idx = min(start_idx + self.page_size, len(visible_rows))
+        prev_page_rows = visible_rows[start_idx:end_idx]
+        
+        for row in prev_page_rows:
+            websign = self.main_window.get_cell_text(row, 0)
+            if websign:
+                self.main_window.web_controller.get_cover_image(
+                    websign, 
+                    size=(130, 150)
+                )

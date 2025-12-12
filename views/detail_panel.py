@@ -352,9 +352,6 @@ class DetailPanel(QWidget):
         message_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self.info_table.setItem(0, 0, message_item)
         self.info_table.setSpan(0, 0, 1, 2)  # Merge cells
-        
-        # Disable action buttons (or enable for batch operations?)
-        self.set_actions_enabled(False)
 
     def resizeEvent(self, event):
         """Handle resize events to update cover image scaling"""

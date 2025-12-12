@@ -272,19 +272,10 @@ class MainWindow(QMainWindow):
         """Switch between table and grid view"""
         if index == 0:  # Table view
             self.view_stack.setCurrentIndex(0)
-            # Sync selection from grid to table
-            grid_selected = self.grid_view.get_selected_rows()
-            if grid_selected:
-                self.sync_selection_to_table(grid_selected)
         else:  # Grid view
             self.view_stack.setCurrentIndex(1)
             # Refresh grid to ensure it's up to date
             self.grid_view.refresh_grid()
-            # Sync selection from table to grid
-            table_selected = self.get_selected_rows()
-            if table_selected:
-                self.grid_view.selected_rows = set(table_selected)
-                self.grid_view.update_selection_visuals()
         
         # Save view preference
         self.save_view_preference(index)

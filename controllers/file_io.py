@@ -35,7 +35,7 @@ class FileIO:
                 QMessageBox.critical(self.main_window, "Import Error", f"Cannot open file: {str(e)}")
 
     def import_from_json(self, file_path):
-        """Import data from JSON file with tag support"""
+        """Import data from JSON file with tag and file_path support"""
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
@@ -43,21 +43,15 @@ class FileIO:
             # Validate JSON structure
             if not isinstance(data, dict) or 'data' not in data:
                 QMessageBox.critical(self.main_window, "Import Error", 
-                                   "Invalid JSON format: missing 'data' field")
+                                "Invalid JSON format: missing 'data' field")
                 return
-            
-            # Check version compatibility
-            version = data.get('version', 1)
-            if version != 1:
-                QMessageBox.warning(self.main_window, "Import Warning", 
-                                  f"JSON file version {version} may not be fully compatible")
             
             success_count = 0
             error_rows = []
             
             for index, row_data in enumerate(data['data']):
                 try:
-                    # Extract fields with fallbacks
+                    # Extract all 11 fields
                     websign = str(row_data.get('websign', ''))
                     author = str(row_data.get('author', ''))
                     title = str(row_data.get('title', ''))
@@ -68,6 +62,7 @@ class FileIO:
                     tag = str(row_data.get('tag', ''))
                     read_status = str(row_data.get('read_status', 'unread')).strip().lower()
                     progress = row_data.get('progress', 0)
+                    file_path = str(row_data.get('file_path', ''))
 
                     # Handle read_status
                     if read_status not in ['unread', 'reading', 'completed']:
@@ -87,8 +82,8 @@ class FileIO:
                         error_rows.append((index + 1, f"Missing required fields: websign='{websign}', author='{author}', title='{title}'"))
                         continue
                     
-                    # Add to table with tag
-                    self.main_window.table_controller.add_to_table((author, title, group, show, magazine, origin, websign, tag, read_status, progress))
+                    # Add to table with all 11 parameters
+                    self.main_window.table_controller.add_to_table((author, title, group, show, magazine, origin, websign, tag, read_status, progress, file_path))
                     success_count += 1
                     
                 except Exception as e:
@@ -109,7 +104,7 @@ class FileIO:
                 QMessageBox.warning(self.main_window, "Import Summary", error_msg)
             else:
                 QMessageBox.information(self.main_window, "Import", 
-                                      f"Successfully imported {success_count} rows from JSON file.")
+                                    f"Successfully imported {success_count} rows from JSON file.")
                 
         except json.JSONDecodeError as e:
             QMessageBox.critical(self.main_window, "Import Error", f"Invalid JSON file: {str(e)}")
@@ -117,7 +112,7 @@ class FileIO:
             QMessageBox.critical(self.main_window, "Import Error", f"Cannot import JSON file: {str(e)}")
 
     def import_from_xlsx(self, file_path):
-        """Import data from XLSX file with tag support"""
+        """Import data from XLSX file with tag and file_path support"""
         try:
             # Read Excel file
             df = pd.read_excel(file_path, sheet_name='Data')
@@ -127,7 +122,7 @@ class FileIO:
             missing_columns = [col for col in required_columns if col not in df.columns]
             if missing_columns:
                 QMessageBox.critical(self.main_window, "Import Error", 
-                                   f"Missing required columns in XLSX file: {', '.join(missing_columns)}")
+                                f"Missing required columns in XLSX file: {', '.join(missing_columns)}")
                 return
             
             success_count = 0
@@ -135,8 +130,7 @@ class FileIO:
             
             for index, row in df.iterrows():
                 try:
-                    # Convert row to tuple format expected by table controller
-                    # Order: author, title, group, show, magazine, origin, websign, tag, read_status, progress
+                    # Extract all fields including file_path
                     websign = str(row['websign']) if pd.notna(row['websign']) else ""
                     author = str(row['author']) if pd.notna(row['author']) else ""
                     title = str(row['title']) if pd.notna(row['title']) else ""
@@ -145,8 +139,7 @@ class FileIO:
                     magazine = str(row['magazine']) if 'magazine' in df.columns and pd.notna(row['magazine']) else ""
                     origin = str(row['origin']) if 'origin' in df.columns and pd.notna(row['origin']) else ""
                     tag = str(row['tag']) if 'tag' in df.columns and pd.notna(row['tag']) else ""
-                    read_status = str(row['read_status']) if 'read_status' in df.columns and pd.notna(row['read_status']) else "unread"
-                    progress = int(row['progress']) if 'progress' in df.columns and pd.notna(row['progress']) else 0
+                    file_path = str(row['file_path']) if 'file_path' in df.columns and pd.notna(row['file_path']) else ""
                     
                     # Handle read_status
                     read_status = "unread"
@@ -176,8 +169,8 @@ class FileIO:
                         error_rows.append((index + 2, f"Missing required fields: websign='{websign}', author='{author}', title='{title}'"))
                         continue
                     
-                    # Add to table with tag
-                    self.main_window.table_controller.add_to_table((author, title, group, show, magazine, origin, websign, tag, read_status, progress))
+                    # Add to table with all 11 parameters
+                    self.main_window.table_controller.add_to_table((author, title, group, show, magazine, origin, websign, tag, read_status, progress, file_path))
                     success_count += 1
                     
                 except Exception as e:
@@ -198,7 +191,7 @@ class FileIO:
                 QMessageBox.warning(self.main_window, "Import Summary", error_msg)
             else:
                 QMessageBox.information(self.main_window, "Import", 
-                                      f"Successfully imported {success_count} rows from XLSX file.")
+                                    f"Successfully imported {success_count} rows from XLSX file.")
                 
         except Exception as e:
             QMessageBox.critical(self.main_window, "Import Error", f"Cannot import XLSX file: {str(e)}")
@@ -298,22 +291,23 @@ class FileIO:
                     self.save_to_file_txt(file_path)
 
     def save_to_json(self, file_path):
-        """Save data to JSON format with tag column"""
+        """Save data to JSON format with file_path column"""
         try:
-            # Prepare data structure
+            # Prepare data structure with 11 columns
             data = {
-                "version": 1,
-                "format": "data_table",
-                "columns": ['websign', 'author', 'title', 'group', 'show', 'magazine', 'origin', 'tag', 'read_status', 'progress'],
+                "version": 1,  # Simple version
+                "columns": ['websign', 'author', 'title', 'group', 'show', 'magazine', 'origin', 'tag', 'read_status', 'progress', 'file_path'],
                 "data": []
             }
             
             for row in range(self.main_window.table.rowCount()):
                 row_data = {}
-                for col, col_name in enumerate(data["columns"]):
+                # Process all 11 columns
+                for col in range(11):
                     item = self.main_window.table.item(row, col)
+                    col_name = data["columns"][col]
+                    
                     if item:
-                        # Handle websign special case
                         if col == 0:  # websign column
                             websign_value = item.data(Qt.ItemDataRole.UserRole)
                             if not websign_value:
@@ -325,9 +319,11 @@ class FileIO:
                                 progress_value = 0
                             row_data[col_name] = progress_value
                         else:
+                            # Regular columns including file_path (col=10)
                             row_data[col_name] = item.text()
                     else:
                         row_data[col_name] = ""
+                
                 data["data"].append(row_data)
             
             # Save to JSON file
@@ -335,22 +331,23 @@ class FileIO:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             
             QMessageBox.information(self.main_window, "Save", 
-                                  f"Data saved in JSON format successfully.\n"
-                                  f"Rows: {self.main_window.table.rowCount()}")
+                                f"Data saved in JSON format successfully.\n"
+                                f"Rows: {self.main_window.table.rowCount()}")
             
         except Exception as e:
             QMessageBox.critical(self.main_window, "Save Error", f"Cannot save JSON file: {str(e)}")
 
     def save_to_xlsx(self, file_path):
-        """Save data to XLSX format with tag column"""
+        """Save data to XLSX format with tag column and file_path"""
         try:
-            # Prepare data for DataFrame
+            # Prepare data for DataFrame - 11 columns including file_path
             data = []
-            column_headers = ['websign', 'author', 'title', 'group', 'show', 'magazine', 'origin', 'tag', 'read_status', 'progress']
+            column_headers = ['websign', 'author', 'title', 'group', 'show', 'magazine', 'origin', 'tag', 'read_status', 'progress', 'file_path']
             
             for row in range(self.main_window.table.rowCount()):
                 row_data = []
-                for col in range(10):
+                # Process all 11 columns
+                for col in range(11):
                     item = self.main_window.table.item(row, col)
                     if item:
                         # Handle websign special case
@@ -364,10 +361,15 @@ class FileIO:
                             if progress_value is None:
                                 progress_value = 0
                             row_data.append(progress_value)
+                        elif col == 10:  # file_path column
+                            # Get file_path from text
+                            row_data.append(item.text())
                         else:
+                            # Regular columns
                             row_data.append(item.text())
                     else:
                         row_data.append("")
+                
                 data.append(row_data)
             
             # Create DataFrame
@@ -392,8 +394,9 @@ class FileIO:
                     worksheet.column_dimensions[column_letter].width = adjusted_width
             
             QMessageBox.information(self.main_window, "Save", 
-                                  f"Data saved in XLSX format successfully.\n"
-                                  f"Rows: {self.main_window.table.rowCount()}")
+                                f"Data saved in XLSX format successfully.\n"
+                                f"Rows: {self.main_window.table.rowCount()}\n"
+                                f"Includes file_path column.")
             
         except Exception as e:
             QMessageBox.critical(self.main_window, "Save Error", f"Cannot save XLSX file: {str(e)}")
