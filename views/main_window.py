@@ -14,7 +14,7 @@ from controllers.web_controller import WebController
 from controllers.table_visual_manager import TableVisualManager
 from views.enhanced_table import EnhancedTableWidget
 from views.sidebar import Sidebar
-from views.grid_view import GridView
+from views.vritualized_grid_view import VirtualizedGridView
 import os
 import re
 
@@ -66,7 +66,7 @@ class MainWindow(QMainWindow):
         self.sidebar.tag_filter_changed.connect(self.apply_tag_filter)
 
         # Initialize grid view
-        self.grid_view = GridView(self)
+        self.grid_view = VirtualizedGridView(self)
         
         self.init_ui()
 
@@ -275,7 +275,7 @@ class MainWindow(QMainWindow):
         else:  # Grid view
             self.view_stack.setCurrentIndex(1)
             # Refresh grid to ensure it's up to date
-            self.grid_view.refresh_grid()
+            self.grid_view.refresh_current_page()
         
         # Save view preference
         self.save_view_preference(index)
@@ -474,7 +474,7 @@ class MainWindow(QMainWindow):
             # Clear detail panel
             self.detail_panel.show_empty_state()
             # Refresh grid view
-            self.grid_view.refresh_grid()
+            self.grid_view.refresh_current_page()
     
     def fetch_zip_numbers(self, lib_path):
         """Recursively scan directory and extract integers from ZIP filenames"""

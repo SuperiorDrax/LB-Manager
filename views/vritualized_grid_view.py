@@ -1,8 +1,8 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QFrame, QScrollArea, QGridLayout, QSizePolicy,
-                             QPushButton, QApplication)
+                             QPushButton, QApplication, QComboBox)
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor, QFont
+import time
 
 class ComicCard(QFrame):
     """Individual comic card for grid view"""
@@ -258,34 +258,138 @@ class ComicCard(QFrame):
             self.double_clicked.emit(self.row_index)
         super().mouseDoubleClickEvent(event)
 
-class GridView(QWidget):
-    """Grid view for displaying comics as visual cards"""
+class GridDataModel:
+    """Data model: manages visible rows and pagination"""
+    def __init__(self, main_window):
+        self.main_window = main_window
+        self.visible_rows_cache = []
+        self.cache_timestamp = 0
+        self.needs_rebuild = True
+        
+    def rebuild_if_needed(self):
+        """Rebuild visible rows cache if needed"""
+        if not self.needs_rebuild:
+            return
+            
+        self.visible_rows_cache = []
+        table = self.main_window.table
+        
+        # Collect all visible rows
+        for row in range(table.rowCount()):
+            if not table.isRowHidden(row):
+                self.visible_rows_cache.append(row)
+        
+        self.cache_timestamp = time.time()
+        self.needs_rebuild = False
+        
+    def get_visible_rows(self):
+        """Get all visible rows (lazy rebuild)"""
+        self.rebuild_if_needed()
+        return self.visible_rows_cache
+    
+    def get_total_visible(self):
+        """Get total number of visible rows"""
+        self.rebuild_if_needed()
+        return len(self.visible_rows_cache)
+    
+    def get_page_rows(self, page_num, page_size):
+        """Get row indices for specific page"""
+        self.rebuild_if_needed()
+        
+        total = len(self.visible_rows_cache)
+        start_idx = page_num * page_size
+        end_idx = min(start_idx + page_size, total)
+        
+        if start_idx >= total:
+            return []
+            
+        return self.visible_rows_cache[start_idx:end_idx]
+    
+    def invalidate_cache(self):
+        """Mark cache as needing rebuild"""
+        self.needs_rebuild = True
+
+
+class RowDataCache:
+    """Row data cache: reduces table access operations"""
+    def __init__(self, main_window):
+        self.main_window = main_window
+        self.cache = {}  # row -> row_data
+        self.hits = 0
+        self.misses = 0
+        
+    def get_row_data(self, row):
+        """Get row data, using cache if available"""
+        if row in self.cache:
+            self.hits += 1
+            return self.cache[row]
+        
+        # Cache miss, fetch from table
+        self.misses += 1
+        data = self.main_window.get_row_data(row)
+        self.cache[row] = data
+        return data
+    
+    def invalidate_row(self, row):
+        """Invalidate cache for specific row"""
+        if row in self.cache:
+            del self.cache[row]
+    
+    def invalidate_all(self):
+        """Clear all cache"""
+        self.cache.clear()
+        self.hits = 0
+        self.misses = 0
+    
+    def get_stats(self):
+        """Get cache statistics"""
+        total = self.hits + self.misses
+        hit_rate = (self.hits / total * 100) if total > 0 else 0
+        return {
+            'cache_size': len(self.cache),
+            'hits': self.hits,
+            'misses': self.misses,
+            'hit_rate': f"{hit_rate:.1f}%"
+        }
+
+
+class VirtualizedGridView(QWidget):
+    """Virtualized grid view: only creates cards for current page"""
     
     selection_changed = pyqtSignal()
     
     def __init__(self, main_window):
         super().__init__()
         self.main_window = main_window
-        self.selected_rows = set()
-        self.cards = {}  # row_index -> ComicCard
-        self.last_clicked_row = -1
+        
+        # Initialize components
+        self.data_model = GridDataModel(main_window)
+        self.data_cache = RowDataCache(main_window)
+        
+        # State management
         self.current_page = 0
         self.page_size = 20
+        self.cards = {}  # Only stores cards for current page
+        self.selected_rows = set()  # Stores all selected rows (even not on current page)
         self.total_pages = 0
         
+        # Initialize UI
         self.init_ui()
         self.connect_signals()
-    
+        
+        # Performance monitoring
+        self.debug_mode = True
+        
     def init_ui(self):
-        """Initialize grid view UI"""
+        """Initialize the virtualized grid view UI"""
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(0)
         
-        # Create scroll area
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        # Create scroll area for virtual scrolling
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         
         # Create container widget for grid
         self.grid_container = QWidget()
@@ -294,12 +398,17 @@ class GridView(QWidget):
         self.grid_layout.setSpacing(15)
         self.grid_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         
-        scroll_area.setWidget(self.grid_container)
-        main_layout.addWidget(scroll_area)
+        self.scroll_area.setWidget(self.grid_container)
+        main_layout.addWidget(self.scroll_area)
+        
+        # Create pagination controls
+        self.create_pagination_controls()
+        main_layout.addWidget(self.pagination_widget)
         
         self.setLayout(main_layout)
-
-        # Add pagination controls
+        
+    def create_pagination_controls(self):
+        """Create pagination control widgets"""
         self.pagination_widget = QWidget()
         pagination_layout = QHBoxLayout()
         
@@ -307,83 +416,137 @@ class GridView(QWidget):
         self.page_label = QLabel("Page 1 of 1")
         self.next_button = QPushButton("Next ▶")
         
+        # Optional: page size selector
+        self.page_size_label = QLabel("Items per page:")
+        self.page_size_combo = QComboBox()
+        self.page_size_combo.addItems(["10", "20", "30", "50"])
+        self.page_size_combo.setCurrentText("20")
+        self.page_size_combo.currentTextChanged.connect(self.on_page_size_changed)
+        
         pagination_layout.addWidget(self.prev_button)
         pagination_layout.addWidget(self.page_label)
         pagination_layout.addWidget(self.next_button)
+        pagination_layout.addStretch()
+        pagination_layout.addWidget(self.page_size_label)
+        pagination_layout.addWidget(self.page_size_combo)
         
         self.pagination_widget.setLayout(pagination_layout)
-        main_layout.addWidget(self.pagination_widget)
         
         # Connect signals
         self.prev_button.clicked.connect(self.prev_page)
         self.next_button.clicked.connect(self.next_page)
-    
+        
     def connect_signals(self):
-        """Connect to main window signals"""
-        # Connect to sidebar filter signals
-        self.main_window.sidebar.status_filter_changed.connect(self.refresh_grid)
-        self.main_window.sidebar.tag_filter_changed.connect(self.refresh_grid)
-        self.main_window.sidebar.filter_reset.connect(self.refresh_grid)
+        """Connect to main window signals for cache invalidation"""
+        # Connect to signals that require cache invalidation
+        self.main_window.sidebar.status_filter_changed.connect(self.invalidate_caches)
+        self.main_window.sidebar.tag_filter_changed.connect(self.invalidate_caches)
+        self.main_window.sidebar.filter_reset.connect(self.invalidate_caches)
         
-        # Connect to data update signals
-        self.main_window.table_controller.data_added.connect(self.refresh_grid)
-        self.main_window.table_controller.data_removed.connect(self.refresh_grid)
-        self.main_window.table_controller.filter_state_changed.connect(self.refresh_grid)
-    
-    def refresh_grid(self):
-        """Refresh the entire grid display"""
-        # Clear existing cards
-        for card in self.cards.values():
-            card.deleteLater()
-        self.cards.clear()
+        # Data change signals
+        self.main_window.table_controller.data_added.connect(self.on_data_changed)
+        self.main_window.table_controller.data_removed.connect(self.on_data_changed)
+        self.main_window.table_controller.filter_state_changed.connect(self.on_data_changed)
         
-        # Get visible rows from table
-        visible_rows = []
-        for row in range(self.main_window.table.rowCount()):
-            if not self.main_window.table.isRowHidden(row):
-                visible_rows.append(row)
+    def invalidate_caches(self):
+        """Invalidate all caches when filters change"""
+        self.data_model.invalidate_cache()
+        self.data_cache.invalidate_all()
+        self.refresh_current_page()
         
-        # Calculate pagination
-        self.total_rows = len(visible_rows)
-        self.total_pages = max(1, (self.total_rows + self.page_size - 1) // self.page_size)
-
-        # Ensure current page is valid
-        self.current_page = min(self.current_page, self.total_pages - 1)
-
-        # Get data for current page
-        start_idx = self.current_page * self.page_size
-        end_idx = min(start_idx + self.page_size, self.total_rows)
-        current_page_rows = visible_rows[start_idx:end_idx]
+    def on_data_changed(self):
+        """Handle data changes (add, remove, filter)"""
+        self.data_model.invalidate_cache()
+        self.refresh_current_page()
         
-        # Create cards for visible rows
-        for i, row in enumerate(current_page_rows):
-            row_data = self.main_window.get_row_data(row)
-            card = ComicCard(row, row_data, self.main_window, self)
+    def on_page_size_changed(self, new_size):
+        """Handle page size change"""
+        try:
+            self.page_size = int(new_size)
+            self.refresh_current_page()
+        except ValueError:
+            pass
             
-            row_pos = i // 4  # 4-column layout
+    def refresh_current_page(self):
+        """Refresh only the current page"""
+        if self.debug_mode:
+            start_time = time.time()
+            print(f"[{start_time:.3f}] refresh_current_page called, page {self.current_page}")
+        
+        # Clear current page cards
+        self.clear_current_page_cards()
+        
+        # Get rows for current page
+        page_rows = self.data_model.get_page_rows(self.current_page, self.page_size)
+        
+        if self.debug_mode:
+            print(f"[{time.time():.3f}] Creating {len(page_rows)} cards")
+        
+        # Create cards only for current page
+        for i, row in enumerate(page_rows):
+            # Get row data from cache
+            row_data = self.data_cache.get_row_data(row)
+            
+            # Create card
+            card = ComicCard(row, row_data, self.main_window, self)
+            card.clicked.connect(self.on_card_clicked)
+            card.double_clicked.connect(self.on_card_double_clicked)
+            
+            # Add to grid
+            row_pos = i // 4  # 4 columns per row
             col_pos = i % 4
             self.grid_layout.addWidget(card, row_pos, col_pos)
             self.cards[row] = card
-
-            # Set selection state
+            
+            # Update selection state
             card.set_selected(row in self.selected_rows)
-
-            # Load cover AFTER card is fully set up
-            QTimer.singleShot(100 * i, card.load_cover_image)  # Stagger the loading
         
-        # Connect signals AFTER all cards are created
-        QTimer.singleShot(50, self._connect_card_signals)
-
-        # Update pagination display
+        # Update pagination
+        total_visible = self.data_model.get_total_visible()
+        self.total_pages = max(1, (total_visible + self.page_size - 1) // self.page_size)
         self.update_pagination_display()
-
-    def _connect_card_signals(self):
-        """Connect signals after cards are fully initialized"""
+        
+        if self.debug_mode:
+            end_time = time.time()
+            print(f"[{end_time:.3f}] refresh_current_page completed in {end_time - start_time:.3f}s")
+            print(f"  Cache stats: {self.data_cache.get_stats()}")
+            
+        # Preload next page covers
+        QTimer.singleShot(200, self.preload_next_page_covers)
+        
+    def clear_current_page_cards(self):
+        """Clear only the cards from current page"""
+        if self.debug_mode:
+            print(f"[{time.time():.3f}] Clearing {len(self.cards)} cards")
+        
         for row, card in self.cards.items():
-            if card:  # Check if card still exists
-                card.clicked.connect(self.on_card_clicked)
-                card.double_clicked.connect(self.on_card_double_clicked)
-    
+            card.deleteLater()
+        self.cards.clear()
+        
+        # Clear the grid layout
+        while self.grid_layout.count():
+            item = self.grid_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+                
+    def update_pagination_display(self):
+        """Update pagination controls display"""
+        self.page_label.setText(f"Page {self.current_page + 1} of {self.total_pages}")
+        self.prev_button.setEnabled(self.current_page > 0)
+        self.next_button.setEnabled(self.current_page < self.total_pages - 1)
+        
+    def next_page(self):
+        """Go to next page"""
+        if self.current_page < self.total_pages - 1:
+            self.current_page += 1
+            self.refresh_current_page()
+            
+    def prev_page(self):
+        """Go to previous page"""
+        if self.current_page > 0:
+            self.current_page -= 1
+            self.refresh_current_page()
+            
     def on_card_clicked(self, row):
         """Handle card click for selection"""
         modifiers = QApplication.keyboardModifiers()
@@ -394,158 +557,58 @@ class GridView(QWidget):
                 self.selected_rows.remove(row)
             else:
                 self.selected_rows.add(row)
-        
         elif modifiers & Qt.KeyboardModifier.ShiftModifier:
-            # Shift+click: select range
-            if self.last_clicked_row >= 0:
-                start = min(self.last_clicked_row, row)
-                end = max(self.last_clicked_row, row)
-                for r in range(start, end + 1):
-                    if r in self.cards:  # Only select visible rows
-                        self.selected_rows.add(r)
-            else:
-                self.selected_rows.add(row)
-        
+            # Shift+click: select range (simplified for virtualization)
+            self.selected_rows.add(row)
         else:
             # Normal click: single selection
             self.selected_rows = {row}
         
-        self.last_clicked_row = row
-        
-        # Update visual selection
-        self.update_selection_visuals()
+        # Update visual selection for current page cards
+        for card_row, card in self.cards.items():
+            card.set_selected(card_row in self.selected_rows)
         
         # Sync with table selection
         self.sync_to_table_selection()
         
         # Emit selection changed signal
         self.selection_changed.emit()
-    
+        
     def on_card_double_clicked(self, row):
-        """Handle card double click to open viewer"""
-        # Select the card first
+        """Handle card double click"""
         self.selected_rows = {row}
-        self.update_selection_visuals()
         self.sync_to_table_selection()
         
-        # Open viewer (same as table double click)
+        # Open viewer
         self.main_window.on_table_double_click(
             self.main_window.table.model().index(row, 0)
         )
-    
-    def update_selection_visuals(self):
-        """Update card visual selection states"""
-        for row, card in self.cards.items():
-            card.set_selected(row in self.selected_rows)
-    
+        
     def sync_to_table_selection(self):
         """Sync grid selection to table selection"""
-        # Clear table selection
         self.main_window.table.clearSelection()
-        
-        # Select rows in table
         for row in self.selected_rows:
             if row < self.main_window.table.rowCount():
-                # Select the entire row
                 for col in range(self.main_window.table.columnCount()):
                     item = self.main_window.table.item(row, col)
                     if item:
                         item.setSelected(True)
-    
-    def sync_from_table_selection(self):
-        """Sync grid selection from table selection"""
-        table_selected = self.main_window.get_selected_rows()
-        
-        # Update grid selection
-        new_selection = set(table_selected)
-        if new_selection != self.selected_rows:
-            self.selected_rows = new_selection
-            self.update_selection_visuals()
-            
-            # Ensure selected cards are visible
-            if self.selected_rows:
-                # Scroll to first selected card
-                first_selected = min(self.selected_rows)
-                if first_selected in self.cards:
-                    self.ensure_card_visible(first_selected)
-    
-    def ensure_card_visible(self, row):
-        """Ensure the card at given row is visible in scroll area"""
-        if row in self.cards:
-            card = self.cards[row]
-            # Scroll to make card visible
-            self.parent().ensureWidgetVisible(card)
-    
-    def get_selected_rows(self):
-        """Get currently selected rows in grid"""
-        return sorted(list(self.selected_rows))
-
-    def next_page(self):
-        """Go to next page and preload the page after"""
-        if self.current_page < self.total_pages - 1:
-            self.current_page += 1
-            self.refresh_grid()
-            
-            # Preload next page after showing current one
-            QTimer.singleShot(100, self.preload_next_page)
-
-    def prev_page(self):
-        """Go to previous page and preload the page before"""
-        if self.current_page > 0:
-            self.current_page -= 1
-            self.refresh_grid()
-            QTimer.singleShot(100, self.preload_prev_page)
-
-    def update_pagination_display(self):
-        """Update pagination controls"""
-        self.page_label.setText(f"Page {self.current_page + 1} of {self.total_pages}")
-        self.prev_button.setEnabled(self.current_page > 0)
-        self.next_button.setEnabled(self.current_page < self.total_pages - 1)
-
-    def preload_next_page(self):
-        """Preload covers for next page in background"""
+                        
+    def preload_next_page_covers(self):
+        """Preload covers for next page"""
         if self.current_page >= self.total_pages - 1:
-            return  # No next page
-        
-        next_page_num = self.current_page + 1
-        visible_rows = self.get_all_visible_rows()
-        start_idx = next_page_num * self.page_size
-        end_idx = min(start_idx + self.page_size, len(visible_rows))
-        next_page_rows = visible_rows[start_idx:end_idx]
-        
-        # Preload covers for next page in background
-        for row in next_page_rows:
-            websign = self.main_window.get_cell_text(row, 0)  # Get websign
-            if websign:
-                # Request cover to cache it
-                self.main_window.web_controller.get_cover_image(
-                    websign, 
-                    size=(130, 150)  # Appropriate size for grid cards
-                )
-
-    def get_all_visible_rows(self):
-        """Get all visible row indices from table"""
-        visible_rows = []
-        for row in range(self.main_window.table.rowCount()):
-            if not self.main_window.table.isRowHidden(row):
-                visible_rows.append(row)
-        return visible_rows
-
-    def preload_prev_page(self):
-        """Preload covers for previous page"""
-        if self.current_page <= 0:
             return
-        
-        prev_page_num = self.current_page - 1
-        visible_rows = self.get_all_visible_rows()
-        start_idx = prev_page_num * self.page_size
-        end_idx = min(start_idx + self.page_size, len(visible_rows))
-        prev_page_rows = visible_rows[start_idx:end_idx]
-        
-        for row in prev_page_rows:
+            
+        next_page_rows = self.data_model.get_page_rows(self.current_page + 1, self.page_size)
+        for row in next_page_rows:
             websign = self.main_window.get_cell_text(row, 0)
             if websign:
+                # Preload to cache
                 self.main_window.web_controller.get_cover_image(
                     websign, 
                     size=(130, 150)
                 )
+                
+    def get_selected_rows(self):
+        """Get currently selected rows"""
+        return sorted(list(self.selected_rows))
