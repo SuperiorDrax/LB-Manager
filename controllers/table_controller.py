@@ -20,83 +20,112 @@ class TableController(QObject):
         self.last_search_options = None
     
     def add_to_table(self, data):
-        """Add parsed data to table with tag support - handles 7, 8, or 10 parameters"""
+        """
+        Add parsed data to virtual table and track duplicates
+        
+        Args:
+            data: Tuple with 7, 8, 10, or 11 parameters
+        """
+        # Get virtual model from main window
+        if not hasattr(self.main_window.table, 'get_model'):
+            print("Error: Virtual model not available")
+            return
+        
+        model = self.main_window.table.get_model()
+        
+        # Process data based on parameter count
+        processed_data = self._process_input_data(data)
+        if not processed_data:
+            print(f"Warning: Failed to process data with {len(data)} elements")
+            return
+        
+        # Check for duplicate before adding
+        websign = processed_data.get('websign', '')
+        
+        if websign and websign in self.websign_tracker:
+            # Show warning for duplicate
+            duplicate_rows = self.websign_tracker[websign]
+            response = self.show_duplicate_warning(websign, duplicate_rows)
+            
+            if response == QMessageBox.StandardButton.No:
+                return  # Don't add duplicate
+            elif response == QMessageBox.StandardButton.YesToAll:
+                # Add all duplicates without asking
+                pass
+        
+        # Add to virtual model
+        model.add_row(processed_data)
+        
+        # Get the new row's visible index (last row)
+        new_visible_row = model.rowCount() - 1
+        
+        # Update websign tracker
+        if websign:
+            if websign not in self.websign_tracker:
+                self.websign_tracker[websign] = []
+            self.websign_tracker[websign].append(new_visible_row)
+            
+            # Highlight if duplicate
+            if len(self.websign_tracker[websign]) > 1:
+                self.highlight_duplicate_rows(websign)
+        
+        # Emit data added signal
+        self.data_added.emit()
+        
+        print(f"Added row with websign: {websign}, total rows: {model.get_total_rows()}")
+
+    def _process_input_data(self, data):
+        """
+        Process input data tuple into dictionary for virtual model
+        
+        Args:
+            data: Input tuple with variable length
+        
+        Returns:
+            dict: Processed data dictionary
+        """
         # Handle variable parameter count with defaults
         if len(data) == 7:
             # Format: author, title, group, show, magazine, origin, websign
             author, title, group, show, magazine, origin, websign = data
-            tag = ""  # Default empty tag
-            read_status = "unread"  # Default unread status
-            progress = 0  # Default 0% progress
-            file_path = ""  # Default empty file path
+            tag = ""
+            read_status = "unread"
+            progress = 0
+            file_path = ""
         elif len(data) == 8:
             # Format: author, title, group, show, magazine, origin, websign, tag
             author, title, group, show, magazine, origin, websign, tag = data
-            read_status = "unread"  # Default unread status
-            progress = 0  # Default 0% progress
-            file_path = ""  # Default empty file path
+            read_status = "unread"
+            progress = 0
+            file_path = ""
         elif len(data) == 10:
             # Full format: author, title, group, show, magazine, origin, websign, tag, read_status, progress
             author, title, group, show, magazine, origin, websign, tag, read_status, progress = data
-            file_path = "" # Default empty file path
+            file_path = ""
         elif len(data) == 11:
-            # Full format: author, title, group, show, magazine, origin, websign, tag, read_status, progress
+            # Full format with file path
             author, title, group, show, magazine, origin, websign, tag, read_status, progress, file_path = data
         else:
             print(f"Warning: Unexpected data length: {len(data)} elements")
-            return
+            return None
         
-        # Process file_path
+        # Process file path
         processed_file_path = self.process_file_path(websign, file_path)
-
-        table = self.main_window.table
         
-        # Add new row
-        row_position = table.rowCount()
-        table.insertRow(row_position)
-        
-        # Create custom items for numeric sorting of websign
-        websign_item = QTableWidgetItem()
-        if websign and websign.isdigit():
-            # Set numeric data for proper sorting
-            websign_item.setData(Qt.ItemDataRole.DisplayRole, int(websign))
-            websign_item.setData(Qt.ItemDataRole.UserRole, websign)  # Store original string
-        else:
-            websign_item.setText(websign)
-        
-        # Create read status item
-        read_status_item = QTableWidgetItem(self.get_read_status_display(read_status))
-        read_status_item.setData(Qt.ItemDataRole.UserRole, read_status)
-        self.apply_read_status_style(read_status_item, read_status)
-        
-        # Create progress item
-        progress_item = QTableWidgetItem(f"{progress}%")
-        progress_item.setData(Qt.ItemDataRole.UserRole, progress)
-
-        # Create file path item with processed path
-        file_path_item = QTableWidgetItem(processed_file_path)
-        
-        # Set data in table - now 8 columns
-        table.setItem(row_position, 0, websign_item)                 # websign
-        table.setItem(row_position, 1, QTableWidgetItem(author))     # author
-        table.setItem(row_position, 2, QTableWidgetItem(title))      # title
-        table.setItem(row_position, 3, QTableWidgetItem(group))      # group
-        table.setItem(row_position, 4, QTableWidgetItem(show))       # show
-        table.setItem(row_position, 5, QTableWidgetItem(magazine))   # magazine
-        table.setItem(row_position, 6, QTableWidgetItem(origin))     # origin
-        table.setItem(row_position, 7, QTableWidgetItem(tag))        # tag
-        table.setItem(row_position, 8, read_status_item)             # read_status
-        table.setItem(row_position, 9, progress_item)                # progress
-        table.setItem(row_position, 10, file_path_item)              # file_path
-
-        if websign not in self.websign_tracker:
-            self.websign_tracker[websign] = []
-        self.websign_tracker[websign].append(row_position)
-
-        if len(self.websign_tracker[websign]) > 1:
-            self.highlight_duplicate_rows(websign)
-        
-        self.data_added.emit()
+        # Return dictionary compatible with VirtualDataModel
+        return {
+            'websign': websign,
+            'author': author,
+            'title': title,
+            'group': group,
+            'show': show,
+            'magazine': magazine,
+            'origin': origin,
+            'tag': tag,
+            'read_status': read_status,
+            'progress': progress,
+            'file_path': processed_file_path
+        }
 
     def process_file_path(self, websign, original_file_path):
         """
@@ -168,47 +197,260 @@ class TableController(QObject):
         return self._search_for_file(websign, lib_path)
 
     def apply_search_filter(self, options):
-        """Apply search filter with undo capability"""
-        # Save current visibility state (if it's the first filter)
+        """
+        Apply search filter using virtual model's capabilities
+        
+        Args:
+            options: Search options dictionary
+        """
+        if not hasattr(self.main_window.table, 'get_model'):
+            return
+        
+        # Note: VirtualDataModel currently doesn't have text search filters
+        # We need to implement this or use a different approach
+        
+        # For now, save current state and apply basic filter
         if not self.is_filtered:
             self.save_current_visibility()
         
-        # Apply filter
-        self.filter_table(options)
+        # Apply filter using virtual model if possible
+        self._apply_virtual_filter(options)
         self.is_filtered = True
         
         # Emit state change signal
         self.filter_state_changed.emit(True)
         self.update_search_button_state()
 
+    def _apply_virtual_filter(self, options):
+        """
+        Apply filter using virtual model's capabilities - Complete implementation
+        
+        Args:
+            options: Search options dictionary
+        """
+        if not options:
+            return
+        
+        # Get virtual model
+        if not hasattr(self.main_window.table, 'get_model'):
+            print("Error: Virtual model not available")
+            return
+        
+        model = self.main_window.table.get_model()
+        
+        # Extract search parameters
+        condition1 = options.get('condition1', {})
+        condition2 = options.get('condition2')
+        logic = options.get('logic', 'AND').upper()
+        use_regex = options.get('use_regex', False)
+        case_sensitive = options.get('case_sensitive', False)
+        
+        # Validate conditions
+        if not condition1 or 'column' not in condition1 or 'text' not in condition1:
+            print("Error: Invalid condition1 in filter options")
+            return
+        
+        # Get column indices
+        column_mapping = {
+            'websign': 0, 'author': 1, 'title': 2, 'group': 3,
+            'show': 4, 'magazine': 5, 'origin': 6, 'tag': 7
+        }
+        
+        col1_name = condition1['column']
+        search_text1 = condition1['text']
+        
+        if col1_name not in column_mapping:
+            print(f"Error: Invalid column name '{col1_name}'")
+            return
+        
+        col1_index = column_mapping[col1_name]
+        
+        if condition2:
+            col2_name = condition2.get('column')
+            search_text2 = condition2.get('text')
+            
+            if not col2_name or not search_text2 or col2_name not in column_mapping:
+                condition2 = None  # Invalid second condition
+            else:
+                col2_index = column_mapping[col2_name]
+        
+        # Create custom filter function
+        def text_filter(row_data, row_index):
+            """Filter function that checks text conditions"""
+            # Get cell values
+            try:
+                # Get value from column 1
+                if col1_index < len(row_data):
+                    cell_value1 = str(row_data[col1_index])
+                else:
+                    return False
+                
+                # Prepare search text
+                if not case_sensitive:
+                    cell_value1_lower = cell_value1.lower()
+                    search_text1_lower = search_text1.lower()
+                else:
+                    cell_value1_lower = cell_value1
+                    search_text1_lower = search_text1
+                
+                # Check first condition
+                if use_regex:
+                    import re
+                    try:
+                        pattern1 = re.compile(search_text1_lower, 0 if case_sensitive else re.IGNORECASE)
+                        matches_cond1 = pattern1.search(cell_value1_lower) is not None
+                    except re.error:
+                        # Invalid regex, fall back to substring
+                        matches_cond1 = search_text1_lower in cell_value1_lower
+                else:
+                    matches_cond1 = search_text1_lower in cell_value1_lower
+                
+                # Check second condition if present
+                if condition2:
+                    if col2_index < len(row_data):
+                        cell_value2 = str(row_data[col2_index])
+                    else:
+                        return False
+                    
+                    if not case_sensitive:
+                        cell_value2_lower = cell_value2.lower()
+                        search_text2_lower = search_text2.lower()
+                    else:
+                        cell_value2_lower = cell_value2
+                        search_text2_lower = search_text2
+                    
+                    if use_regex:
+                        import re
+                        try:
+                            pattern2 = re.compile(search_text2_lower, 0 if case_sensitive else re.IGNORECASE)
+                            matches_cond2 = pattern2.search(cell_value2_lower) is not None
+                        except re.error:
+                            matches_cond2 = search_text2_lower in cell_value2_lower
+                    else:
+                        matches_cond2 = search_text2_lower in cell_value2_lower
+                    
+                    # Apply logic
+                    if logic == 'AND':
+                        return matches_cond1 and matches_cond2
+                    else:  # OR
+                        return matches_cond1 or matches_cond2
+                else:
+                    return matches_cond1
+                    
+            except Exception as e:
+                print(f"Error in filter function: {e}")
+                return False
+        
+        # Apply the filter
+        if hasattr(model, 'apply_advanced_filter'):
+            model.apply_advanced_filter(text_filter)
+            self.is_filtered = True
+            
+            visible_count = model.rowCount()
+            total_count = model.get_total_rows() if hasattr(model, 'get_total_rows') else 0
+            
+            print(f"Applied text filter: {visible_count}/{total_count} rows visible")
+            print(f"  Condition1: {col1_name} contains '{search_text1}'")
+            if condition2:
+                print(f"  Condition2: {col2_name} contains '{search_text2}'")
+                print(f"  Logic: {logic}")
+            print(f"  Regex: {use_regex}, Case-sensitive: {case_sensitive}")
+        else:
+            print("Error: Model doesn't support advanced filtering")
+            QMessageBox.warning(self.main_window, "Filter Error", 
+                            "The data model doesn't support text filtering.")
+
     def save_current_visibility(self):
-        """Save current row visibility state"""
-        self.original_row_visibility = []
-        for row in range(self.main_window.table.rowCount()):
-            self.original_row_visibility.append(not self.main_window.table.isRowHidden(row))
+        """
+        Save current visibility state for undo capability
+        
+        Note: In virtual model, we save the current visible row indices
+        """
+        if not hasattr(self.main_window.table, 'get_model'):
+            self.original_row_visibility = []
+            return
+        
+        model = self.main_window.table.get_model()
+        
+        # Save current visible rows
+        self.original_row_visibility = model.get_visible_rows().copy()
+        
+        print(f"Saved visibility state: {len(self.original_row_visibility)} visible rows")
 
     def reset_search_filter(self):
-        """Reset search filter to original state"""
-        if self.is_filtered and self.original_row_visibility:
-            # Restore original visibility state
-            for row, visible in enumerate(self.original_row_visibility):
-                self.main_window.table.setRowHidden(row, not visible)
+        """
+        Reset search filter using virtual model capabilities
+        """
+        if not hasattr(self.main_window.table, 'get_model'):
+            return
+        
+        model = self.main_window.table.get_model()
+        
+        if self.is_filtered:
+            # Clear all filters in virtual model
+            model.clear_filters()
+            
+            # Clear text filter if supported
+            if hasattr(model, 'clear_text_filter'):
+                model.clear_text_filter()
+            
+            # Clear advanced filter if supported
+            if hasattr(model, 'clear_advanced_filter'):
+                model.clear_advanced_filter()
+            
+            print("Cleared all filters")
         
         self.is_filtered = False
         self.original_row_visibility = []
         self.filter_state_changed.emit(False)
         self.update_search_button_state()
 
+    def get_filter_info(self):
+        """
+        Get information about current filters
+        
+        Returns:
+            dict: Filter information
+        """
+        if not hasattr(self.main_window.table, 'get_model'):
+            return {}
+        
+        model = self.main_window.table.get_model()
+        
+        info = {
+            'is_filtered': self.is_filtered,
+            'visible_rows': self.get_visible_row_count(),
+            'total_rows': 0,
+            'filter_details': {}
+        }
+        
+        # Get total rows
+        if hasattr(model, 'get_total_rows'):
+            info['total_rows'] = model.get_total_rows()
+        
+        # Get filter state from model
+        if hasattr(model, 'get_filter_state'):
+            info['filter_details'] = model.get_filter_state()
+        
+        return info
+
     def get_visible_row_count(self):
-        """Calculate visible row count"""
-        count = 0
-        for row in range(self.main_window.table.rowCount()):
-            if not self.main_window.table.isRowHidden(row):
-                count += 1
-        return count
+        """
+        Calculate visible row count from virtual model
+        """
+        if not hasattr(self.main_window.table, 'get_model'):
+            return 0
+        
+        model = self.main_window.table.get_model()
+        return model.rowCount()
 
     def update_search_button_state(self):
-        """Update search button text and behavior based on filter state"""
+        """
+        Update search button text and behavior based on filter state
+        """
+        if not hasattr(self.main_window, 'search_button'):
+            return
+        
         search_button = self.main_window.search_button
         
         try:
@@ -225,245 +467,191 @@ class TableController(QObject):
             search_button.clicked.connect(self.main_window.show_search_dialog)
     
     def search_next(self, options):
-        """Search with multiple conditions"""
+        """
+        Search with multiple conditions using virtual model
+        
+        Args:
+            options: Search options dictionary
+        """
         if not hasattr(self, 'current_search_row'):
             self.current_search_row = -1
-
+        
         if not options:
             return
         
-        start_row = self.current_search_row
-        row_count = self.main_window.table.rowCount()
-        use_regex = options.get('use_regex', False)
+        # Get virtual model
+        if not hasattr(self.main_window.table, 'get_model'):
+            return
         
-        # Compile regex if enabled
-        if use_regex:
-            try:
-                pattern1 = re.compile(options['condition1']['text'], re.IGNORECASE)
-                match_func1 = lambda text: pattern1.search(text) is not None
-                
-                if 'condition2' in options:
-                    pattern2 = re.compile(options['condition2']['text'], re.IGNORECASE)
-                    match_func2 = lambda text: pattern2.search(text) is not None
-                else:
-                    match_func2 = None
-                    
-            except re.error as e:
-                QMessageBox.warning(self.main_window, "Regex Error", 
-                                f"Invalid regular expression:\n{str(e)}")
+        model = self.main_window.table.get_model()
+        
+        # Search for matching rows
+        if hasattr(model, 'search_rows'):
+            matching_rows = model.search_rows(options)
+            
+            if not matching_rows:
+                QMessageBox.warning(self.main_window, "Search", 
+                                    "Cannot find the specified text.")
+                self.current_search_row = 0
                 return
-        else:
-            text1 = options['condition1']['text'].lower()
-            match_func1 = lambda text: text1 in text.lower()
             
-            if 'condition2' in options:
-                text2 = options['condition2']['text'].lower()
-                match_func2 = lambda text: text2 in text.lower()
-            else:
-                match_func2 = None
-        
-        # Get column indices
-        column_mapping = {
-            'websign': 0, 'author': 1, 'title': 2, 'group': 3,
-            'show': 4, 'magazine': 5, 'origin': 6, 'tag': 7
-        }
-        
-        col1_index = column_mapping[options['condition1']['column']]
-        if 'condition2' in options:
-            col2_index = column_mapping[options['condition2']['column']]
-        
-        # Search from current position
-        for row in range(start_row, row_count):
-            item1 = self.main_window.table.item(row, col1_index)
-            if not item1:
-                continue
-            
-            # Single condition
-            if match_func2 is None:
-                if match_func1(item1.text()):
-                    self.main_window.table.selectRow(row)
-                    self.current_search_row = row + 1
+            # Find next match from current position
+            for i, row in enumerate(matching_rows):
+                if row > self.current_search_row:
+                    self.current_search_row = row
+                    
+                    # Select the row in table
+                    if hasattr(self.main_window.table, 'selectRow'):
+                        self.main_window.table.selectRow(row)
+                    
+                    # Update for next search
+                    if i == len(matching_rows) - 1:
+                        self.current_search_row = 0  # Wrap around
+                    else:
+                        self.current_search_row = row + 1
                     return
-            # Multiple conditions
-            else:
-                item2 = self.main_window.table.item(row, col2_index)
-                if not item2:
-                    continue
-                
-                condition1_matched = match_func1(item1.text())
-                condition2_matched = match_func2(item2.text())
-                
-                if options['logic'] == 'AND':
-                    if condition1_matched and condition2_matched:
-                        self.main_window.table.selectRow(row)
-                        self.current_search_row = row + 1
-                        return
-                else:  # OR logic
-                    if condition1_matched or condition2_matched:
-                        self.main_window.table.selectRow(row)
-                        self.current_search_row = row + 1
-                        return
-        
-        # If not found, ask to search from beginning
-        reply = QMessageBox.question(self.main_window, "Search", 
-                                "Cannot find more occurrences. Search from the beginning?",
-                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            self.current_search_row = 0
-            for row in range(row_count):
-                item1 = self.main_window.table.item(row, col1_index)
-                if not item1:
-                    continue
-                
-                if match_func2 is None:
-                    if match_func1(item1.text()):
-                        self.main_window.table.selectRow(row)
-                        self.current_search_row = row + 1
-                        return
-                else:
-                    item2 = self.main_window.table.item(row, col2_index)
-                    if not item2:
-                        continue
-                    
-                    condition1_matched = match_func1(item1.text())
-                    condition2_matched = match_func2(item2.text())
-                    
-                    if options['logic'] == 'AND':
-                        if condition1_matched and condition2_matched:
-                            self.main_window.table.selectRow(row)
-                            self.current_search_row = row + 1
-                            return
-                    else:  # OR logic
-                        if condition1_matched or condition2_matched:
-                            self.main_window.table.selectRow(row)
-                            self.current_search_row = row + 1
-                            return
             
-            QMessageBox.warning(self.main_window, "Search", "Cannot find the specified text.")
+            # If we get here, no matches after current position
+            reply = QMessageBox.question(self.main_window, "Search", 
+                                    "Cannot find more occurrences. Search from the beginning?",
+                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                self.current_search_row = 0
+                if matching_rows:
+                    row = matching_rows[0]
+                    self.current_search_row = row + 1
+                    if hasattr(self.main_window.table, 'selectRow'):
+                        self.main_window.table.selectRow(row)
+            else:
+                self.current_search_row = 0
         else:
-            self.current_search_row = 0
+            QMessageBox.warning(self.main_window, "Search Error", 
+                                "Search not supported in current model.")
 
     def filter_table(self, options):
-        """Filter table with multiple conditions - hide rows instead of deleting"""
+        """
+        Filter table with multiple conditions - using virtual model
+        
+        Args:
+            options: Filter options dictionary
+        """
         if not options:
             return
         
-        use_regex = options.get('use_regex', False)
+        # Get virtual model
+        if not hasattr(self.main_window.table, 'get_model'):
+            print("Error: Virtual model not available")
+            return
         
-        # Compile regex if enabled
-        if use_regex:
-            try:
-                pattern1 = re.compile(options['condition1']['text'], re.IGNORECASE)
-                match_func1 = lambda text: pattern1.search(text) is not None
-                
-                if 'condition2' in options:
-                    pattern2 = re.compile(options['condition2']['text'], re.IGNORECASE)
-                    match_func2 = lambda text: pattern2.search(text) is not None
-                else:
-                    match_func2 = None
-                    
-            except re.error as e:
-                QMessageBox.warning(self.main_window, "Regex Error", 
-                                f"Invalid regular expression:\n{str(e)}")
-                return
-        else:
-            text1 = options['condition1']['text'].lower()
-            match_func1 = lambda text: text1 in text.lower()
+        model = self.main_window.table.get_model()
+        
+        # Save current visibility state if it's the first filter
+        if not self.is_filtered:
+            self.save_current_visibility()
+        
+        try:
+            # Apply the virtual filter
+            self._apply_virtual_filter(options)
             
-            if 'condition2' in options:
-                text2 = options['condition2']['text'].lower()
-                match_func2 = lambda text: text2 in text.lower()
-            else:
-                match_func2 = None
-        
-        # Get column indices
-        column_mapping = {
-            'websign': 0, 'author': 1, 'title': 2, 'group': 3,
-            'show': 4, 'magazine': 5, 'origin': 6, 'tag': 7
-        }
-        
-        col1_index = column_mapping[options['condition1']['column']]
-        if 'condition2' in options:
-            col2_index = column_mapping[options['condition2']['column']]
-        
-        # Hide rows that don't match the conditions instead of deleting
-        visible_count = 0
-        for row in range(self.main_window.table.rowCount()):
-            item1 = self.main_window.table.item(row, col1_index)
-            if not item1:
-                self.main_window.table.setRowHidden(row, True)
-                continue
+            # Update filter state
+            self.is_filtered = True
+            self.filter_state_changed.emit(True)
+            self.update_search_button_state()
             
-            # Single condition
-            if match_func2 is None:
-                if match_func1(item1.text()):
-                    self.main_window.table.setRowHidden(row, False)
-                    visible_count += 1
-                else:
-                    self.main_window.table.setRowHidden(row, True)
-            # Multiple conditions
+            # Show result count
+            visible_count = self.get_visible_row_count()
+            total_count = model.get_total_rows() if hasattr(model, 'get_total_rows') else 0
+            
+            if visible_count == 0:
+                QMessageBox.information(self.main_window, "Filter", 
+                                    "No rows match the filter criteria.")
             else:
-                item2 = self.main_window.table.item(row, col2_index)
-                if not item2:
-                    self.main_window.table.setRowHidden(row, True)
-                    continue
+                print(f"Filter successful: {visible_count}/{total_count} rows visible")
                 
-                condition1_matched = match_func1(item1.text())
-                condition2_matched = match_func2(item2.text())
-                
-                if options['logic'] == 'AND':
-                    if condition1_matched and condition2_matched:
-                        self.main_window.table.setRowHidden(row, False)
-                        visible_count += 1
-                    else:
-                        self.main_window.table.setRowHidden(row, True)
-                else:  # OR logic
-                    if condition1_matched or condition2_matched:
-                        self.main_window.table.setRowHidden(row, False)
-                        visible_count += 1
-                    else:
-                        self.main_window.table.setRowHidden(row, True)
-        
-        if visible_count == 0:
-            QMessageBox.warning(self.main_window, "Filter", "Cannot find the specified text.")
+        except Exception as e:
+            print(f"Error applying filter: {e}")
+            QMessageBox.critical(self.main_window, "Filter Error", 
+                                f"Failed to apply filter: {str(e)}")
     
     def highlight_duplicate_rows(self, websign):
-        """Highlight all rows with duplicate websign with light red background"""
-        if websign in self.websign_tracker:
-            duplicate_color = QColor(255, 230, 230)  # Light red
-            for row in self.websign_tracker[websign]:
-                for col in range(self.main_window.table.columnCount()):
-                    item = self.main_window.table.item(row, col)
-                    if item:
-                        item.setBackground(duplicate_color)
+        """
+        Highlight all rows with duplicate websign using virtual model styling
+        
+        Args:
+            websign: Websign to check for duplicates
+        """
+        if websign not in self.websign_tracker:
+            return
+        
+        # Get virtual model
+        if not hasattr(self.main_window.table, 'get_model'):
+            return
+        
+        model = self.main_window.table.get_model()
+        
+        # Check if model supports styling
+        if not hasattr(model, 'set_row_background'):
+            print("Warning: Virtual model doesn't support styling")
+            return
+        
+        duplicate_rows = self.websign_tracker[websign]
+        
+        if len(duplicate_rows) > 1:
+            # Highlight all duplicate rows with light red
+            for visible_row in duplicate_rows:
+                model.set_row_background(visible_row, '#FFE6E6')  # Light red
+            
+            print(f"Highlighted {len(duplicate_rows)} duplicate rows for websign: {websign}")
 
     def reapply_duplicate_highlighting(self):
-        """Re-apply duplicate highlighting while preserving alternating row colors"""
-        # Clear all backgrounds and let Qt handle alternating colors
-        for row in range(self.main_window.table.rowCount()):
-            for col in range(self.main_window.table.columnCount()):
-                item = self.main_window.table.item(row, col)
-                if item:
-                    # Clear background to let Qt's alternating colors take effect
-                    item.setBackground(QBrush())  # Clear brush
+        """
+        Re-apply duplicate highlighting using virtual model styling
+        """
+        # Get virtual model
+        if not hasattr(self.main_window.table, 'get_model'):
+            return
         
-        # Force Qt to recalculate alternating colors
-        self.main_window.table.setAlternatingRowColors(False)
-        self.main_window.table.setAlternatingRowColors(True)
+        model = self.main_window.table.get_model()
         
-        # Then apply highlighting for duplicates (will override for duplicate rows only)
+        # Check if model supports styling
+        if not hasattr(model, 'clear_row_styles'):
+            print("Warning: Virtual model doesn't support styling")
+            return
+        
+        # Clear all existing styling
+        model.clear_row_styles()
+        
+        # Re-apply highlighting for duplicates
         for websign, rows in self.websign_tracker.items():
             if len(rows) > 1:
-                self.highlight_duplicate_rows(websign)
+                # Highlight all duplicate rows with light red
+                for visible_row in rows:
+                    if hasattr(model, 'set_row_background'):
+                        model.set_row_background(visible_row, '#FFE6E6')
+        
+        print(f"Reapplied duplicate highlighting for {len(self.websign_tracker)} websigns")
 
     def show_duplicate_warning(self, websign, duplicate_rows):
-        """Show warning for duplicate websign"""
-        msg = QMessageBox(self)
+        """
+        Show warning for duplicate websign
+        
+        Args:
+            websign: Duplicate websign
+            duplicate_rows: List of row indices with this websign
+        
+        Returns:
+            QMessageBox.StandardButton: User's response
+        """
+        msg = QMessageBox(self.main_window)
         msg.setIcon(QMessageBox.Icon.Warning)
         msg.setWindowTitle("Duplicate Websign Detected")
+        
+        # Format message
+        visible_rows = [str(r + 1) for r in duplicate_rows]
         msg.setText(f"Websign '{websign}' already exists in the table.")
-        msg.setInformativeText(f"Found at row(s): {', '.join(str(r+1) for r in duplicate_rows)}\n\nDo you want to add this duplicate entry?")
+        msg.setInformativeText(f"Found at row(s): {', '.join(visible_rows)}\n\n"
+                            f"Do you want to add this duplicate entry?")
         
         msg.setStandardButtons(
             QMessageBox.StandardButton.Yes |
@@ -471,59 +659,99 @@ class TableController(QObject):
             QMessageBox.StandardButton.YesToAll
         )
         
+        # Set default to No
+        msg.setDefaultButton(QMessageBox.StandardButton.No)
+        
         return msg.exec()
 
     def rebuild_websign_tracker(self):
-        """Rebuild the websign tracker from current table data"""
+        """
+        Rebuild the websign tracker from virtual model data
+        
+        Returns:
+            dict: Updated websign tracker
+        """
+        if not hasattr(self.main_window.table, 'get_model'):
+            return self.websign_tracker
+        
+        model = self.main_window.table.get_model()
         self.websign_tracker.clear()
         
-        for row in range(self.main_window.table.rowCount()):
-            websign_item = self.main_window.table.item(row, 0)
-            if websign_item and websign_item.text():
-                websign = websign_item.data(Qt.ItemDataRole.UserRole)
-                if not websign:
-                    websign = websign_item.text()
+        # Check if model supports duplicate finding
+        if hasattr(model, 'find_duplicates'):
+            # Use model's efficient duplicate finding
+            duplicates = model.find_duplicates('websign')
+            
+            for websign, visible_rows in duplicates.items():
+                self.websign_tracker[websign] = visible_rows
                 
-                if websign not in self.websign_tracker:
-                    self.websign_tracker[websign] = []
-                self.websign_tracker[websign].append(row)
-                
-                # Update duplicate highlighting
-                if len(self.websign_tracker[websign]) > 1:
+                # Apply highlighting if there are duplicates
+                if len(visible_rows) > 1:
                     self.highlight_duplicate_rows(websign)
-
-    def on_row_removed(self, deleted_row):
-        """Update websign tracker and other data when row is removed"""
-        # Rebuild the entire websign tracker since row indices change
-        self.rebuild_websign_tracker()
+        else:
+            # Fallback: manual processing
+            for visible_row in range(model.rowCount()):
+                row_data = model.get_row_data(visible_row)
+                websign = row_data.get('websign', '')
+                
+                if websign:
+                    if websign not in self.websign_tracker:
+                        self.websign_tracker[websign] = []
+                    self.websign_tracker[websign].append(visible_row)
+                    
+                    # Update duplicate highlighting
+                    if len(self.websign_tracker[websign]) > 1:
+                        self.highlight_duplicate_rows(websign)
+        
+        print(f"Rebuilt websign tracker: {len(self.websign_tracker)} unique websigns")
+        
+        # Report duplicates
+        duplicate_count = sum(1 for rows in self.websign_tracker.values() if len(rows) > 1)
+        if duplicate_count > 0:
+            print(f"Found {duplicate_count} websigns with duplicates")
+        
+        return self.websign_tracker
     
     def update_progress(self, rows, progress):
-        """Update progress for rows - supports both single row and multiple rows"""
+        """
+        Update progress for rows - using virtual model
+        
+        Args:
+            rows: Single row index or list of row indices
+            progress: Progress percentage (0-100)
+        """
+        if not hasattr(self.main_window.table, 'get_model'):
+            return
+        
         if not isinstance(rows, list):
-            rows = [rows]  # Convert single row to list
+            rows = [rows]
+        
+        model = self.main_window.table.get_model()
         
         for row in rows:
             try:
-                progress_item = self.main_window.table.item(row, 9)
-                if progress_item:
-                    progress = max(0, min(100, progress))
-                    progress_item.setText(f"{progress}%")
-                    progress_item.setData(Qt.ItemDataRole.UserRole, progress)
-                    
-                    # Auto-update read status based on progress
-                    read_status_item = self.main_window.table.item(row, 8)
-                    if read_status_item:
-                        if progress == 0:
-                            new_status = "unread"
-                        elif progress == 100:
-                            new_status = "completed"
-                        else:
-                            new_status = "reading"
-                        
-                        read_status_item.setData(Qt.ItemDataRole.UserRole, new_status)
-                        read_status_item.setText(self.get_read_status_display(new_status))
-                        self.apply_read_status_style(read_status_item, new_status)
-                        
+                # Get current row data
+                row_data = model.get_row_data(row)
+                if not row_data:
+                    continue
+                
+                # Clamp progress value
+                progress_value = max(0, min(100, progress))
+                
+                # Update progress in row data
+                row_data['progress'] = progress_value
+                
+                # Auto-update read status based on progress
+                if progress_value == 0:
+                    row_data['read_status'] = 'unread'
+                elif progress_value == 100:
+                    row_data['read_status'] = 'completed'
+                else:
+                    row_data['read_status'] = 'reading'
+                
+                # Update row in model
+                model.update_row(row, row_data)
+                
             except Exception as e:
                 print(f"Error updating progress for row {row}: {e}")
     
@@ -547,3 +775,136 @@ class TableController(QObject):
         else:  # unread
             item.setBackground(QColor(255, 220, 220))  # Light red
             item.setForeground(QColor(100, 0, 0))      # Dark red text
+
+    def batch_update_rows(self, updates):
+        """
+        Batch update multiple rows efficiently
+        
+        Args:
+            updates: Dict of {row_index: data_dict} updates
+        """
+        if not hasattr(self.main_window.table, 'get_model'):
+            return
+        
+        model = self.main_window.table.get_model()
+        
+        if hasattr(model, 'batch_update_rows'):
+            model.batch_update_rows(updates)
+        else:
+            # Fallback: update rows individually
+            for row, data in updates.items():
+                model.update_row(row, data)
+
+    def get_table_statistics(self):
+        """
+        Get statistics from virtual model
+        
+        Returns:
+            dict: Statistics including row counts, cache performance, etc.
+        """
+        if not hasattr(self.main_window.table, 'get_model'):
+            return {}
+        
+        model = self.main_window.table.get_model()
+        
+        stats = {
+            'total_rows': model.get_total_rows(),
+            'visible_rows': model.rowCount(),
+            'is_filtered': self.is_filtered
+        }
+        
+        # Add performance stats if available
+        if hasattr(model, 'get_performance_stats'):
+            perf_stats = model.get_performance_stats()
+            stats.update(perf_stats)
+        
+        return stats
+
+    def get_performance_stats(self):
+        """
+        Get performance statistics from virtual model
+        
+        Returns:
+            dict: Performance statistics
+        """
+        if not hasattr(self.main_window.table, 'get_model'):
+            return {}
+        
+        model = self.main_window.table.get_model()
+        
+        stats = {
+            'table_controller': {
+                'is_filtered': self.is_filtered,
+                'websign_tracker_size': len(self.websign_tracker),
+                'duplicate_websigns': sum(1 for rows in self.websign_tracker.values() if len(rows) > 1)
+            }
+        }
+        
+        # Get model performance stats
+        if hasattr(model, 'get_performance_stats'):
+            model_stats = model.get_performance_stats()
+            stats['virtual_model'] = model_stats
+        
+        # Get filter info
+        stats['filters'] = self.get_filter_info()
+        
+        return stats
+
+    def print_debug_info(self):
+        """
+        Print debug information about current state
+        """
+        print("\n=== TableController Debug Info ===")
+        
+        # Basic info
+        print(f"Filter active: {self.is_filtered}")
+        print(f"Visible rows: {self.get_visible_row_count()}")
+        print(f"Websign tracker entries: {len(self.websign_tracker)}")
+        
+        # Duplicate info
+        dup_count = sum(1 for rows in self.websign_tracker.values() if len(rows) > 1)
+        print(f"Duplicate websigns: {dup_count}")
+        
+        # Model info
+        if hasattr(self.main_window.table, 'get_model'):
+            model = self.main_window.table.get_model()
+            print(f"Model total rows: {model.get_total_rows()}")
+            print(f"Model visible rows: {model.rowCount()}")
+        
+        # Performance stats
+        stats = self.get_performance_stats()
+        if stats.get('virtual_model'):
+            perf = stats['virtual_model']
+            hit_rate = perf.get('cache_hit_rate', 0)
+            print(f"Cache hit rate: {hit_rate:.1f}%")
+        
+        print("================================\n")
+
+    def get_current_filter_info(self):
+        """
+        Get information about the currently applied filter
+        
+        Returns:
+            dict: Filter information
+        """
+        if not hasattr(self.main_window.table, 'get_model'):
+            return {}
+        
+        model = self.main_window.table.get_model()
+        
+        info = {
+            'is_filtered': self.is_filtered,
+            'visible_rows': self.get_visible_row_count(),
+            'total_rows': model.get_total_rows() if hasattr(model, 'get_total_rows') else 0,
+            'filter_type': 'none'
+        }
+        
+        # Check what type of filter is active
+        if hasattr(model, '_text_filter_active') and model._text_filter_active:
+            info['filter_type'] = 'text_filter'
+        elif hasattr(model, '_custom_filter_active') and model._custom_filter_active:
+            info['filter_type'] = 'custom_filter'
+        elif hasattr(model, '_filters') and model._filters:
+            info['filter_type'] = 'status_tag_filter'
+        
+        return info

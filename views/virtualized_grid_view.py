@@ -84,9 +84,9 @@ class ComicCard(QFrame):
         
         self.setLayout(layout)
         self.update_content()
-    
+
     def update_content(self):
-        """Update card content with comic data"""
+        """Update card content with comic data from virtual model"""
         # Title (truncate if too long)
         title = self.comic_data.get('title', '')
         if len(title) > 10:
@@ -122,12 +122,12 @@ class ComicCard(QFrame):
                 font-weight: bold;
             }}
         """)
-
+        
         # Load cover image
         self.load_cover_image()
 
     def load_cover_image(self):
-        """Load cover image for this comic card with proper lifecycle handling"""
+        """Load cover image for this comic card with virtual model support"""
         # Check if card is still valid and visible
         if not self.isVisible() or not self.parent():
             return
@@ -146,7 +146,7 @@ class ComicCard(QFrame):
             
             # Get cover image from web controller
             pixmap = self.main_window.web_controller.get_cover_image(
-                websign, 
+                str(websign), 
                 size=(130, 150)  # Size appropriate for grid cards
             )
             
@@ -265,19 +265,32 @@ class GridDataModel:
         self.visible_rows_cache = []
         self.cache_timestamp = 0
         self.needs_rebuild = True
-        
+
     def rebuild_if_needed(self):
         """Rebuild visible rows cache if needed"""
         if not self.needs_rebuild:
             return
             
         self.visible_rows_cache = []
-        table = self.main_window.table
         
-        # Collect all visible rows
-        for row in range(table.rowCount()):
-            if not table.isRowHidden(row):
-                self.visible_rows_cache.append(row)
+        # Try to get visible rows directly from virtual model
+        if hasattr(self.main_window.table, 'get_model'):
+            model = self.main_window.table.get_model()
+            
+            # Virtual model already manages visible rows
+            # We just need to get the list of visible row indices
+            for visible_row in range(model.rowCount()):
+                self.visible_rows_cache.append(visible_row)
+            
+            print(f"[GridDataModel] Rebuilt from virtual model: {len(self.visible_rows_cache)} visible rows")
+        else:
+            # Fallback: old method using table widget
+            table = self.main_window.table
+            for row in range(table.rowCount()):
+                if not table.isRowHidden(row):
+                    self.visible_rows_cache.append(row)
+            
+            print(f"[GridDataModel] Rebuilt from table widget: {len(self.visible_rows_cache)} visible rows")
         
         self.cache_timestamp = time.time()
         self.needs_rebuild = False
@@ -309,6 +322,17 @@ class GridDataModel:
         """Mark cache as needing rebuild"""
         self.needs_rebuild = True
 
+    def get_model(self):
+        """
+        Get virtual model if available
+        
+        Returns:
+            VirtualDataModel or None
+        """
+        if hasattr(self.main_window.table, 'get_model'):
+            return self.main_window.table.get_model()
+        return None
+
 
 class RowDataCache:
     """Row data cache: reduces table access operations"""
@@ -317,18 +341,41 @@ class RowDataCache:
         self.cache = {}  # row -> row_data
         self.hits = 0
         self.misses = 0
-        
+
     def get_row_data(self, row):
-        """Get row data, using cache if available"""
+        """
+        Get row data directly from virtual model
+        
+        Args:
+            row: Visible row index
+        
+        Returns:
+            dict: Row data as dictionary
+        """
         if row in self.cache:
             self.hits += 1
             return self.cache[row]
         
-        # Cache miss, fetch from table
+        # Cache miss - get from virtual model
         self.misses += 1
-        data = self.main_window.get_row_data(row)
-        self.cache[row] = data
-        return data
+        
+        # Check if we can access virtual model directly
+        if hasattr(self.main_window.table, 'get_model'):
+            model = self.main_window.table.get_model()
+            
+            # Ensure row is within bounds
+            if row < 0 or row >= model.rowCount():
+                return {}
+            
+            # Get data directly from model
+            data = model.get_row_data(row)
+            self.cache[row] = data
+            return data
+        else:
+            # Fallback: use main_window method (for compatibility)
+            data = self.main_window.get_row_data(row)
+            self.cache[row] = data
+            return data
     
     def invalidate_row(self, row):
         """Invalidate cache for specific row"""
@@ -352,6 +399,19 @@ class RowDataCache:
             'hit_rate': f"{hit_rate:.1f}%"
         }
 
+    def invalidate_row_cache(self, row):
+        """
+        Invalidate cache for specific row
+        
+        Args:
+            row: Row index to invalidate
+        """
+        if row in self.cache:
+            del self.cache[row]
+        
+        # Also invalidate any dependent caches
+        if hasattr(self, '_cover_cache') and row in self._cover_cache:
+            del self._cover_cache[row]
 
 class VirtualizedGridView(QWidget):
     """Virtualized grid view: only creates cards for current page"""
@@ -435,18 +495,67 @@ class VirtualizedGridView(QWidget):
         # Connect signals
         self.prev_button.clicked.connect(self.prev_page)
         self.next_button.clicked.connect(self.next_page)
-        
+
     def connect_signals(self):
-        """Connect to main window signals for cache invalidation"""
-        # Connect to signals that require cache invalidation
-        self.main_window.sidebar.status_filter_changed.connect(self.invalidate_caches)
-        self.main_window.sidebar.tag_filter_changed.connect(self.invalidate_caches)
-        self.main_window.sidebar.filter_reset.connect(self.invalidate_caches)
+        """Connect to signals for cache invalidation"""
+        # Connect to main window signals
+        if hasattr(self.main_window, 'sidebar'):
+            self.main_window.sidebar.status_filter_changed.connect(self.invalidate_caches)
+            self.main_window.sidebar.tag_filter_changed.connect(self.invalidate_caches)
+            self.main_window.sidebar.filter_reset.connect(self.invalidate_caches)
         
-        # Data change signals
-        self.main_window.table_controller.data_added.connect(self.on_data_changed)
-        self.main_window.table_controller.data_removed.connect(self.on_data_changed)
-        self.main_window.table_controller.filter_state_changed.connect(self.on_data_changed)
+        # Data change signals from table controller
+        # These will be connected later when table_controller is created
+        QTimer.singleShot(100, self._connect_table_controller_signals)
+        
+        # Don't connect to virtual model here - it might not be ready yet
+        # We'll connect later in refresh_current_page()
+
+    def _connect_table_controller_signals(self):
+        """Connect to table controller signals (called after initialization)"""
+        if hasattr(self.main_window, 'table_controller'):
+            self.main_window.table_controller.data_added.connect(self.on_data_changed)
+            self.main_window.table_controller.data_removed.connect(self.on_data_changed)
+            self.main_window.table_controller.filter_state_changed.connect(self.on_data_changed)
+            
+            print("[VirtualizedGridView] Connected to table controller signals")
+        
+        # Try to connect to virtual model
+        model = self.get_virtual_model()
+        if model:
+            # Connect to model's dataChanged signal
+            model.dataChanged.connect(self.on_model_data_changed)
+            model.layoutChanged.connect(self.on_model_layout_changed)
+            
+            print("[VirtualizedGridView] Connected to virtual model signals")
+
+    def on_model_data_changed(self, top_left, bottom_right, roles):
+        """
+        Handle data changes in virtual model
+        
+        Args:
+            top_left: Top-left index of changed region
+            bottom_right: Bottom-right index of changed region
+            roles: List of changed roles
+        """
+        # Invalidate cache for affected rows
+        for row in range(top_left.row(), bottom_right.row() + 1):
+            self.data_cache.invalidate_row(row)
+        
+        # Refresh if affected rows are on current page
+        current_page_rows = self.data_model.get_page_rows(self.current_page, self.page_size)
+        affected_rows = range(top_left.row(), bottom_right.row() + 1)
+        
+        if any(row in affected_rows for row in current_page_rows):
+            self.refresh_current_page()
+
+    def on_model_layout_changed(self):
+        """Handle layout changes in virtual model (e.g., sorting)"""
+        # Invalidate all caches
+        self.invalidate_caches()
+        
+        # Refresh current page
+        self.refresh_current_page()
         
     def invalidate_caches(self):
         """Invalidate all caches when filters change"""
@@ -466,9 +575,9 @@ class VirtualizedGridView(QWidget):
             self.refresh_current_page()
         except ValueError:
             pass
-            
+
     def refresh_current_page(self):
-        """Refresh only the current page"""
+        """Refresh only the current page with virtual model integration"""
         if self.debug_mode:
             start_time = time.time()
             print(f"[{start_time:.3f}] refresh_current_page called, page {self.current_page}")
@@ -476,15 +585,23 @@ class VirtualizedGridView(QWidget):
         # Clear current page cards
         self.clear_current_page_cards()
         
+        # Invalidate data cache when refreshing page
+        self.data_cache.invalidate_all()
+        
         # Get rows for current page
         page_rows = self.data_model.get_page_rows(self.current_page, self.page_size)
         
         if self.debug_mode:
             print(f"[{time.time():.3f}] Creating {len(page_rows)} cards")
         
+        # Get virtual model for direct access
+        model = None
+        if hasattr(self.main_window.table, 'get_model'):
+            model = self.main_window.table.get_model()
+        
         # Create cards only for current page
         for i, row in enumerate(page_rows):
-            # Get row data from cache
+            # Get row data from cache (which now uses virtual model)
             row_data = self.data_cache.get_row_data(row)
             
             # Create card
@@ -511,6 +628,11 @@ class VirtualizedGridView(QWidget):
             print(f"[{end_time:.3f}] refresh_current_page completed in {end_time - start_time:.3f}s")
             print(f"  Cache stats: {self.data_cache.get_stats()}")
             
+            # Show virtual model stats if available
+            if model and hasattr(model, 'get_performance_stats'):
+                model_stats = model.get_performance_stats()
+                print(f"  Model stats: {model_stats.get('cache_hit_rate', 0):.1f}% hit rate")
+        
         # Preload next page covers
         QTimer.singleShot(200, self.preload_next_page_covers)
         
@@ -573,42 +695,152 @@ class VirtualizedGridView(QWidget):
         
         # Emit selection changed signal
         self.selection_changed.emit()
-        
+
     def on_card_double_clicked(self, row):
-        """Handle card double click"""
+        """Handle card double click with virtual model support"""
         self.selected_rows = {row}
         self.sync_to_table_selection()
         
-        # Open viewer
-        self.main_window.on_table_double_click(
-            self.main_window.table.model().index(row, 0)
-        )
-        
+        # Get virtual model index
+        if hasattr(self.main_window.table, 'get_model'):
+            model = self.main_window.table.get_model()
+            if row < model.rowCount():
+                index = model.index(row, 0)
+                
+                # Open viewer using main window's handler
+                self.main_window.on_table_double_click(index)
+        else:
+            # Fallback
+            print(f"Double clicked row {row}, but no virtual model available")
+
     def sync_to_table_selection(self):
-        """Sync grid selection to table selection"""
+        """Sync grid selection to table selection using virtual model"""
+        # Clear table selection first
         self.main_window.table.clearSelection()
+        
+        # Select rows in table
         for row in self.selected_rows:
-            if row < self.main_window.table.rowCount():
-                for col in range(self.main_window.table.columnCount()):
-                    item = self.main_window.table.item(row, col)
-                    if item:
-                        item.setSelected(True)
-                        
+            if hasattr(self.main_window.table, 'selectRow'):
+                # Use VirtualTableView's selectRow method
+                self.main_window.table.selectRow(row)
+            else:
+                # Fallback: select each cell in the row
+                model = self.main_window.table.get_model()
+                if model and row < model.rowCount():
+                    for col in range(model.columnCount()):
+                        index = model.index(row, col)
+                        self.main_window.table.selectionModel().select(
+                            index,
+                            self.main_window.table.selectionModel().SelectionFlag.Select
+                        )
+
     def preload_next_page_covers(self):
-        """Preload covers for next page"""
+        """Preload covers for next page using virtual model"""
         if self.current_page >= self.total_pages - 1:
             return
             
         next_page_rows = self.data_model.get_page_rows(self.current_page + 1, self.page_size)
-        for row in next_page_rows:
-            websign = self.main_window.get_cell_text(row, 0)
-            if websign:
-                # Preload to cache
-                self.main_window.web_controller.get_cover_image(
-                    websign, 
-                    size=(130, 150)
-                )
+        
+        # Try to get websign directly from virtual model
+        if hasattr(self.main_window.table, 'get_model'):
+            model = self.main_window.table.get_model()
+            
+            for row in next_page_rows:
+                # Get websign directly from model
+                if row < model.rowCount():
+                    # Use UserRole for original websign string
+                    index = model.index(row, 0)  # websign column
+                    websign = model.data(index, Qt.ItemDataRole.UserRole)
+                    
+                    if not websign:
+                        # Fallback to display role
+                        websign = model.data(index, Qt.ItemDataRole.DisplayRole)
+                    
+                    if websign:
+                        # Preload to cache
+                        self.main_window.web_controller.get_cover_image(
+                            str(websign), 
+                            size=(130, 150)
+                        )
+        else:
+            # Fallback: use main_window method
+            for row in next_page_rows:
+                websign = self.main_window.get_cell_text(row, 0)
+                if websign:
+                    # Preload to cache
+                    self.main_window.web_controller.get_cover_image(
+                        websign, 
+                        size=(130, 150)
+                    )
                 
     def get_selected_rows(self):
         """Get currently selected rows"""
         return sorted(list(self.selected_rows))
+
+    def get_virtual_model(self):
+        """
+        Get the virtual data model safely
+        
+        Returns:
+            VirtualDataModel or None
+        """
+        # Check if main_window has been fully initialized
+        if not hasattr(self.main_window, 'table'):
+            return None
+        
+        # Check if table has get_model method
+        if hasattr(self.main_window.table, 'get_model'):
+            return self.main_window.table.get_model()
+        
+        return None
+
+    def update_from_virtual_model(self):
+        """
+        Update grid view directly from virtual model changes
+        
+        This should be called when virtual model data changes
+        """
+        # Invalidate all caches
+        self.data_model.invalidate_cache()
+        self.data_cache.invalidate_all()
+        
+        # Clear current selection
+        self.selected_rows.clear()
+        
+        # Refresh current page
+        self.refresh_current_page()
+        
+        print(f"[VirtualizedGridView] Updated from virtual model")
+
+    def get_model_stats(self):
+        """
+        Get statistics from virtual model
+        
+        Returns:
+            dict: Model statistics
+        """
+        model = self.get_virtual_model()
+        if not model:
+            return {}
+        
+        stats = {
+            'grid_view': {
+                'current_page': self.current_page,
+                'page_size': self.page_size,
+                'total_pages': self.total_pages,
+                'selected_rows': len(self.selected_rows),
+                'cards_loaded': len(self.cards)
+            },
+            'data_cache': self.data_cache.get_stats(),
+            'data_model': {
+                'visible_rows': self.data_model.get_total_visible(),
+                'needs_rebuild': self.data_model.needs_rebuild
+            }
+        }
+        
+        # Add model stats if available
+        if hasattr(model, 'get_performance_stats'):
+            model_stats = model.get_performance_stats()
+            stats['virtual_model'] = model_stats
+        
+        return stats

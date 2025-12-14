@@ -1,7 +1,7 @@
-from PyQt6.QtWidgets import (QSplitter, QMainWindow, QWidget, 
-                             QVBoxLayout, QHBoxLayout, QTableWidget, 
-                             QPushButton, QMessageBox, QMenu, QDialog, 
-                             QTableWidgetItem, QTabBar, QStackedWidget)
+from PyQt6.QtWidgets import (QSplitter, QMainWindow, QWidget,
+                             QVBoxLayout, QHBoxLayout,
+                             QPushButton, QMessageBox, QMenu, QDialog,
+                             QTabBar, QStackedWidget)
 from PyQt6.QtCore import Qt, QTimer
 from views.detail_panel import DetailPanel
 from models.config_manager import ConfigManager
@@ -12,74 +12,68 @@ from controllers.table_controller import TableController
 from controllers.state_manager import StateManager
 from controllers.web_controller import WebController
 from controllers.table_visual_manager import TableVisualManager
-from views.enhanced_table import EnhancedTableWidget
+from views.virtual_table_view import VirtualTableView
 from views.sidebar import Sidebar
-from views.vritualized_grid_view import VirtualizedGridView
+from views.virtualized_grid_view import VirtualizedGridView
 import os
 import re
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-
-        # Set window title
         self.setWindowTitle("LB Manager")
+        self.resize(1150, 700)
         
-        # Set default window size before restoring state
-        self.resize(1150, 700)  # Larger default size
-        
-        # Initialize managers and controllers
+        # Step 1: Basic managers
         self.config_manager = ConfigManager()
         self.data_parser = DataParser()
         self.file_io = FileIO(self)
-        self.table_controller = TableController(self)
-        self.state_manager = StateManager(self)
-        self.web_controller = WebController(self)
-        self.visual_manager = TableVisualManager(self)
-        
-        # Initialize data storage
         self.data = []
         
         # Load settings
         self.jm_website_value = self.config_manager.get_jm_website()
         self.dist_website_value = self.config_manager.get_dist_website()
         self.lib_path_value = self.config_manager.get_lib_path()
-
-        # Initialize detail panel
-        self.detail_panel = DetailPanel(self)
         
-        # Restore window state (may override default size)
-        self.state_manager.restore_window_state()
-
-        # Initialize sidebar
-        self.sidebar = Sidebar(self)
-        self.sidebar.tag_filter_changed.connect(self.apply_tag_filter)
-
-        # Initialize detail panel
-        self.detail_panel = DetailPanel(self)
-
-        # Restore window state
-        self.state_manager.restore_window_state()
+        # Step 2: Setup basic UI (without menu bar)
+        self.setup_basic_ui()
         
-        # Initialize sidebar
+        # Step 3: Initialize controllers
+        self.table_controller = TableController(self)
+        self.state_manager = StateManager(self)
+        self.web_controller = WebController(self)
+        self.visual_manager = TableVisualManager(self)
+        
+        # Step 4: Initialize other UI components
+        self.detail_panel = DetailPanel(self)
         self.sidebar = Sidebar(self)
-        self.sidebar.tag_filter_changed.connect(self.apply_tag_filter)
-
-        # Initialize grid view
         self.grid_view = VirtualizedGridView(self)
         
+        # Add sidebar and detail panel to splitter
+        self.main_splitter.insertWidget(0, self.sidebar)
+        self.main_splitter.addWidget(self.detail_panel)
+        
+        # Step 5: Complete UI initialization
         self.init_ui()
-
+        
+        # Step 6: Create menu bar (now web_controller exists)
+        self.create_menu_bar()
+        
+        # Step 7: Restore window state
+        self.state_manager.restore_window_state()
+        
+        # Step 8: Connect signals
+        self.sidebar.tag_filter_changed.connect(self.apply_tag_filter)
         self.table_controller.rebuild_websign_tracker()
         self.table_controller.data_added.connect(self.update_sidebar_counts)
         self.table_controller.filter_state_changed.connect(self.on_filter_state_changed)
         self.grid_view.selection_changed.connect(self.on_grid_selection_changed)
-    
-    def init_ui(self):
-        """Initialize UI with sidebar and menu bar"""
-        # Create menu bar first
-        self.create_menu_bar()
+        
+        # Step 9: Load saved view preference
+        self.load_view_preference()
 
+    def setup_basic_ui(self):
+        """Setup basic UI components without menu bar"""
         # Create central widget
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -91,9 +85,6 @@ class MainWindow(QMainWindow):
 
         # Create splitter for resizable panels
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        
-        # Add sidebar (fixed width initially)
-        self.main_splitter.addWidget(self.sidebar)
         
         # Create middle container for view switching
         middle_container = QWidget()
@@ -129,51 +120,30 @@ class MainWindow(QMainWindow):
         # Create stacked widget for views
         self.view_stack = QStackedWidget()
         
-        # Create table view container (existing structure)
+        # Create table view container
         table_container = QWidget()
         table_layout = QVBoxLayout()
         table_layout.setContentsMargins(10, 10, 10, 10)
         table_layout.setSpacing(10)
         
-        # Create table using enhanced version
-        self.table = EnhancedTableWidget()
-        self.table.setColumnCount(11)
-        self.table.setHorizontalHeaderLabels([
-            'websign', 'author', 'title', 'group', 'show', 'magazine', 'origin', 'tag', 'read_status', 'progress', 'file_path'
-        ])
+        # Create virtual table
+        self.table = VirtualTableView()
         
         # Set column widths
-        self.table.setColumnWidth(0, 80)
-        self.table.setColumnWidth(1, 120)
-        self.table.setColumnWidth(2, 200)
-        self.table.setColumnWidth(3, 100)
-        self.table.setColumnWidth(4, 100)
-        self.table.setColumnWidth(5, 120)
-        self.table.setColumnWidth(6, 120)
-        self.table.setColumnWidth(7, 150)
-        self.table.setColumnWidth(8, 80)
-        self.table.setColumnWidth(9, 80)
-        self.table.setColumnWidth(10, 100)
-
+        self.table.setColumnWidth(0, 80)   # websign
+        self.table.setColumnWidth(1, 120)  # author
+        self.table.setColumnWidth(2, 200)  # title
+        self.table.setColumnWidth(3, 100)  # group
+        self.table.setColumnWidth(4, 100)  # show
+        self.table.setColumnWidth(5, 120)  # magazine
+        self.table.setColumnWidth(6, 120)  # origin
+        self.table.setColumnWidth(7, 150)  # tag
+        self.table.setColumnWidth(8, 80)   # read_status
+        self.table.setColumnWidth(9, 80)   # progress
+        self.table.setColumnWidth(10, 100) # file_path
+        
         # Hide file_path column by default
         self.table.setColumnHidden(10, True)
-        
-        # Enable table features
-        self.table.setSortingEnabled(True)
-        self.table.setAlternatingRowColors(True)
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
-        
-        # Connect table signals
-        self.table.doubleClicked.connect(self.on_table_double_click)
-        self.table.itemSelectionChanged.connect(self.on_table_selection_changed)
-        
-        # Connect column signals
-        self.table.horizontalHeader().setSectionsMovable(True)
-        self.table.horizontalHeader().setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.table.horizontalHeader().customContextMenuRequested.connect(self.visual_manager.show_header_context_menu)
-        self.table.horizontalHeader().sectionResized.connect(self.state_manager.on_column_resized)
-        self.table.horizontalHeader().sectionMoved.connect(self.state_manager.on_column_moved)
         
         # Create buttons for table view
         button_layout = QHBoxLayout()
@@ -193,16 +163,15 @@ class MainWindow(QMainWindow):
         
         # Add views to stack
         self.view_stack.addWidget(table_container)
-        self.view_stack.addWidget(self.grid_view)
-        
+        # Note: grid_view will be added later after initialization
         middle_layout.addWidget(self.view_stack)
         middle_container.setLayout(middle_layout)
         self.main_splitter.addWidget(middle_container)
         
-        # Add detail panel
-        self.main_splitter.addWidget(self.detail_panel)
+        main_layout.addWidget(self.main_splitter)
+        central_widget.setLayout(main_layout)
         
-        # Set initial splitter sizes (will be overridden by state manager)
+        # Set initial splitter sizes
         self.main_splitter.setSizes([220, 600, 300])
         
         # Set splitter handle style
@@ -215,11 +184,25 @@ class MainWindow(QMainWindow):
                 background-color: #95a5a6;
             }
         """)
+
+    def init_ui(self):
+        """Complete UI initialization (called after all controllers are created)"""
+        # Now add grid view to stack (grid_view is initialized in __init__)
+        self.view_stack.addWidget(self.grid_view)
         
-        main_layout.addWidget(self.main_splitter)
-        central_widget.setLayout(main_layout)
+        # Connect table signals
+        self.table.doubleClicked.connect(self.on_table_double_click)
+        self.table.itemSelectionChanged.connect(self.on_table_selection_changed)
         
-        # Connect signals
+        # Connect column signals
+        self.table.horizontalHeader().setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.horizontalHeader().customContextMenuRequested.connect(self.visual_manager.show_header_context_menu)
+        
+        # Connect to state_manager
+        self.table.horizontalHeader().sectionResized.connect(self.state_manager.on_column_resized)
+        self.table.horizontalHeader().sectionMoved.connect(self.state_manager.on_column_moved)
+        
+        # Connect button signals
         self.search_button.clicked.connect(self.show_search_dialog)
         self.clear_button.clicked.connect(self.clear_table)
         
@@ -227,14 +210,8 @@ class MainWindow(QMainWindow):
         self.sidebar.status_filter_changed.connect(self.apply_status_filter)
         self.sidebar.filter_reset.connect(self.reset_table_filter)
         
-        # Install event filter for context menu
-        self.table.viewport().installEventFilter(self)
-        
         # Update sidebar counts initially
         self.update_sidebar_counts()
-        
-        # Load saved view preference
-        self.load_view_preference()
     
     def create_menu_bar(self):
         menu_bar = self.menuBar()
@@ -291,9 +268,18 @@ class MainWindow(QMainWindow):
                         item.setSelected(True)
 
     def on_grid_selection_changed(self):
-        """Handle grid view selection changes"""
+        """
+        Handle grid view selection changes
+        """
+        if not hasattr(self.grid_view, 'get_selected_rows'):
+            return
+        
         # Get selected rows from grid
         selected_rows = self.grid_view.get_selected_rows()
+        
+        # Sync to table selection
+        if hasattr(self.table, 'sync_selection_with_grid'):
+            self.table.sync_selection_with_grid(set(selected_rows))
         
         # Update detail panel
         if not selected_rows:
@@ -331,26 +317,6 @@ class MainWindow(QMainWindow):
     def show_about_dialog(self):
         """Show about information"""
         QMessageBox.about(self, "About", "Author: Deepseek")
-
-    def eventFilter(self, obj, event):
-        """Event filter to handle right-click menu duplicate trigger issue"""
-        if obj is self.table.viewport() and event.type() == event.Type.ContextMenu:
-            # Handle right-click menu event
-            return self.handle_context_menu_event(event)
-        return super().eventFilter(obj, event)
-
-    def handle_context_menu_event(self, event):
-        """Handle right-click menu event"""
-        # Get clicked row
-        row = self.table.rowAt(event.pos().y())
-        if row < 0:
-            return False
-            
-        # Use original show_context_menu method
-        self.show_context_menu(event.pos())
-        
-        # Mark event as handled to prevent default behavior
-        return True
 
     def show_context_menu(self, position):
         """Show right-click context menu for selected rows"""
@@ -439,17 +405,6 @@ class MainWindow(QMainWindow):
     def reset_search_filter(self):
         """Reset search filter - called from button click"""
         self.table_controller.reset_search_filter()
-
-    def update_search_button_behavior(self):
-        """Update search button connection based on filter state"""
-        self.search_button.clicked.disconnect()
-        
-        if self.table_controller.is_filtered:
-            self.search_button.setText(f"Show All ({self.table_controller.get_visible_row_count()} shown)")
-            self.search_button.clicked.connect(self.reset_search_filter)
-        else:
-            self.search_button.setText("Search")
-            self.search_button.clicked.connect(self.show_search_dialog)
     
     def search_next(self, column, search_text):
         self.table_controller.search_next(column, search_text)
@@ -458,23 +413,29 @@ class MainWindow(QMainWindow):
         self.table_controller.filter_table(column, search_text)
     
     def clear_table(self):
-        reply = QMessageBox.question(self, "Clear", 
-                                "Are you sure you want to clear all data?",
-                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        """
+        Clear all data from virtual table
+        """
+        reply = QMessageBox.question(
+            self, 
+            "Clear", 
+            "Are you sure you want to clear all data?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
         
         if reply == QMessageBox.StandardButton.Yes:
-            self.table.setRowCount(0)
-            self.data.clear()
-            self.table_controller.websign_tracker.clear()
-            self.table.clear_all_sorting()
-            self.table_controller.is_filtered = False
-            self.table_controller.original_row_visibility = []
-            self.table_controller.filter_state_changed.emit(False)
+            # Clear virtual table
+            self.table.clear()
+            
+            # Clear grid view
+            if hasattr(self.grid_view, 'refresh_current_page'):
+                self.grid_view.refresh_current_page()
+            
+            # Update sidebar counts
             self.update_sidebar_counts()
+            
             # Clear detail panel
             self.detail_panel.show_empty_state()
-            # Refresh grid view
-            self.grid_view.refresh_current_page()
     
     def fetch_zip_numbers(self, lib_path):
         """Recursively scan directory and extract integers from ZIP filenames"""
@@ -590,84 +551,60 @@ class MainWindow(QMainWindow):
         self.table_controller.update_progress(row, progress)
 
     def apply_status_filter(self, status):
-        """Apply status filter to table"""
-        if status == "all":
-            self.reset_table_filter()
-            return
+        """
+        Apply status filter to virtual table
         
-        for row in range(self.table.rowCount()):
-            read_status_item = self.table.item(row, 8)
-            if read_status_item:
-                actual_status = read_status_item.data(Qt.ItemDataRole.UserRole)
-                should_show = actual_status == status
-                self.table.setRowHidden(row, not should_show)
-    
+        Args:
+            status: Status to filter by ("all", "unread", "reading", "completed")
+        """
+        self.table.apply_status_filter(status)
+        self.update_sidebar_counts()
+        
+        # Invalidate grid view cache
+        if hasattr(self.grid_view, 'invalidate_caches'):
+            self.grid_view.invalidate_caches()
+
     def reset_table_filter(self):
-        """Reset table filter to show all rows"""
-        for row in range(self.table.rowCount()):
-            self.table.setRowHidden(row, False)
+        """
+        Reset all filters in virtual table
+        """
+        self.table.reset_table_filter()
+        self.update_sidebar_counts()
+        
+        # Invalidate grid view cache
+        if hasattr(self.grid_view, 'invalidate_caches'):
+            self.grid_view.invalidate_caches()
     
     def update_sidebar_counts(self):
-        """Update sidebar with current row counts and tag data"""
-        counts = {
-            "all": self.table.rowCount(),
-            "unread": 0,
-            "reading": 0,
-            "completed": 0
-        }
+        """
+        Update sidebar with current statistics from virtual model
+        """
+        if not hasattr(self.table, 'get_model'):
+            return
         
-        tag_frequency = {}
+        model = self.table.get_model()
         
-        # Count all rows by their actual status and collect tags
-        for row in range(self.table.rowCount()):
-            read_status_item = self.table.item(row, 8)
-            if read_status_item:
-                status = read_status_item.data(Qt.ItemDataRole.UserRole)
-                if status in counts:
-                    counts[status] += 1
-            
-            # Collect tags
-            tag_item = self.table.item(row, 7)  # tag column
-            if tag_item:
-                tag_text = tag_item.text()
-                if tag_text:
-                    # Split tags by comma and count each one
-                    tags = [tag.strip() for tag in tag_text.split(',') if tag.strip()]
-                    for tag in tags:
-                        tag_frequency[tag] = tag_frequency.get(tag, 0) + 1
+        # Get statistics directly from model
+        status_counts = model.get_status_counts()
+        tag_frequency = model.get_all_tags()
         
-        # Update sidebar with counts and tag data
-        self.sidebar.update_status_counts(counts)
+        # Update sidebar
+        self.sidebar.update_status_counts(status_counts)
         self.sidebar.update_tag_cloud(tag_frequency)
 
     def apply_tag_filter(self, selected_tags):
-        """Apply tag filter to table"""
-        if not selected_tags:
-            # No tags selected, show all rows (respecting status filter)
-            current_status = self.get_current_status_filter()
-            self.apply_status_filter(current_status)
-            return
+        """
+        Apply tag filter to virtual table
         
-        for row in range(self.table.rowCount()):
-            tag_item = self.table.item(row, 7)  # tag column
-            should_show = False
-            
-            if tag_item:
-                tag_text = tag_item.text()
-                if tag_text:
-                    # Split tags by comma and check if any matches selected tags
-                    row_tags = [tag.strip() for tag in tag_text.split(',') if tag.strip()]
-                    should_show = any(tag in selected_tags for tag in row_tags)
-            
-            # Also respect current status filter
-            read_status_item = self.table.item(row, 8)
-            if read_status_item:
-                current_status = self.get_current_status_filter()
-                if current_status != "all":
-                    actual_status = read_status_item.data(Qt.ItemDataRole.UserRole)
-                    should_show = should_show and (actual_status == current_status)
-            
-            self.table.setRowHidden(row, not should_show)
+        Args:
+            selected_tags: List of tags to filter by
+        """
+        self.table.apply_tag_filter(selected_tags)
+        self.update_sidebar_counts()
+        
+        # Invalidate grid view cache
+        if hasattr(self.grid_view, 'invalidate_caches'):
+            self.grid_view.invalidate_caches()
 
     def get_current_status_filter(self):
         """Get currently selected status filter"""
@@ -708,7 +645,9 @@ class MainWindow(QMainWindow):
                 self.setCursor(Qt.CursorShape.ArrowCursor)
 
     def on_table_selection_changed(self):
-        """Handle table selection changes to update detail panel"""
+        """
+        Handle table selection changes and update detail panel
+        """
         selected_rows = self.get_selected_rows()
         
         if not selected_rows:
@@ -725,117 +664,244 @@ class MainWindow(QMainWindow):
             # Single row selected
             row_data = self.get_row_data(selected_rows[0])
             self.detail_panel.update_details(row_data)
+        
+        # Sync with grid view if in grid mode
+        if hasattr(self, 'view_tab_bar') and self.view_tab_bar.currentIndex() == 1:
+            if hasattr(self.grid_view, 'selected_rows'):
+                self.grid_view.selected_rows = set(selected_rows)
+                if hasattr(self.grid_view, 'refresh_current_page'):
+                    self.grid_view.refresh_current_page()
 
     def get_selected_rows(self):
-        """Get all selected row indices"""
-        selected_ranges = self.table.selectedRanges()
-        selected_rows = set()
+        """
+        Get all selected row indices from virtual table
         
-        for selection_range in selected_ranges:
-            for row in range(selection_range.topRow(), selection_range.bottomRow() + 1):
-                selected_rows.add(row)
+        Returns:
+            List[int]: List of selected row indices (sorted)
+        """
+        if not hasattr(self.table, 'get_selected_rows'):
+            # Fallback for compatibility
+            selected_rows = set()
+            model = self.table.get_model()
+            
+            for row in range(model.rowCount()):
+                # Check if any cell in the row is selected
+                for col in range(model.columnCount()):
+                    index = model.index(row, col)
+                    if self.table.selectionModel().isSelected(index):
+                        selected_rows.add(row)
+                        break
+            
+            return sorted(list(selected_rows))
         
-        return sorted(list(selected_rows))
+        # Use VirtualTableView's built-in method
+        return self.table.get_selected_rows()
 
     def edit_rows(self, rows):
-        """Edit selected rows - for multiple rows, only edit the first one"""
+        """
+        Edit selected rows - for multiple rows, only edit the first one
+        
+        Args:
+            rows: List of row indices to edit (only first one is edited)
+        """
         if not rows:
             return
         
         # For multiple rows, only edit the first one
         row_to_edit = rows[0] if isinstance(rows, list) else rows
         
-        # Get current row data
+        # Get current row data from virtual model
         row_data = self.get_row_data(row_to_edit)
+        if not row_data:
+            QMessageBox.warning(self, "Edit Error", "Cannot retrieve row data")
+            return
         
         # Open edit dialog
+        from views.dialogs import EditDialog
         dialog = EditDialog(self, row_data)
+        
         if dialog.exec() == QDialog.DialogCode.Accepted:
             edited_data = dialog.get_edited_data()
+            
+            # Update the row
             self.update_row_data(row_to_edit, edited_data)
+            
+            # If multiple rows were selected, ask if user wants to apply same changes
+            if isinstance(rows, list) and len(rows) > 1:
+                reply = QMessageBox.question(
+                    self, 
+                    "Apply to All", 
+                    f"Apply the same changes to all {len(rows)} selected rows?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                
+                if reply == QMessageBox.StandardButton.Yes:
+                    # Create updates for all selected rows
+                    updates = {}
+                    for row in rows[1:]:  # Skip first row already updated
+                        updates[row] = edited_data
+                    
+                    # Batch update remaining rows
+                    self.batch_update_rows(updates)
     
-    def get_row_data(self, row):
-        """Get current data from the specified row"""
-        return {
-            'websign': self.get_cell_text(row, 0),
-            'author': self.get_cell_text(row, 1),
-            'title': self.get_cell_text(row, 2),
-            'group': self.get_cell_text(row, 3),
-            'show': self.get_cell_text(row, 4),
-            'magazine': self.get_cell_text(row, 5),
-            'origin': self.get_cell_text(row, 6),
-            'tag': self.get_cell_text(row, 7),
-            'read_status': self.get_cell_text(row, 8),
-            'progress': self.get_cell_text(row, 9),
-            'file_path': self.get_cell_text(row, 10)
-        }
-    
+    def get_row_data(self, visible_row):
+        """
+        Get row data from virtual model
+        
+        Args:
+            visible_row: Visible row index (after filtering)
+        
+        Returns:
+            dict: Row data as dictionary
+        """
+        if not hasattr(self.table, 'get_model'):
+            return {}
+        
+        model = self.table.get_model()
+        if visible_row < 0 or visible_row >= model.rowCount():
+            return {}
+        
+        return model.get_row_data(visible_row)
+        
     def get_cell_text(self, row, column):
-        """Get text from specific cell"""
-        item = self.table.item(row, column)
-        if item:
-            # For websign column, get the original data
-            if column == 0:
-                websign_data = item.data(Qt.ItemDataRole.UserRole)
-                return websign_data if websign_data else item.text()
-            # For read_status column, get the actual status from UserRole
-            elif column == 8:
-                status_data = item.data(Qt.ItemDataRole.UserRole)
-                return status_data if status_data else item.text()
-            # For progress column, extract number from text
-            elif column == 9:
-                text = item.text()
-                if text.endswith('%'):
-                    return text[:-1]  # Remove % sign
-                return text
-            return item.text()
-        return ""
+        """
+        Get cell text from virtual model
+        
+        Args:
+            row: Row index
+            column: Column index
+        
+        Returns:
+            str: Cell text
+        """
+        if not hasattr(self.table, 'get_model'):
+            return ""
+        
+        model = self.table.get_model()
+        if row < 0 or row >= model.rowCount() or column < 0 or column >= model.columnCount():
+            return ""
+        
+        index = model.index(row, column)
+        
+        # Special handling for certain columns
+        if column == 0:  # websign column
+            # Get original websign string from UserRole
+            websign = model.data(index, Qt.ItemDataRole.UserRole)
+            return str(websign) if websign is not None else ""
+        elif column == 8:  # read_status column
+            # Get actual status from UserRole
+            status = model.data(index, Qt.ItemDataRole.UserRole)
+            return str(status) if status is not None else "unread"
+        elif column == 9:  # progress column
+            # Get numeric progress from UserRole
+            progress = model.data(index, Qt.ItemDataRole.UserRole)
+            return str(progress) if progress is not None else "0"
+        else:
+            # Get display text for other columns
+            text = model.data(index, Qt.ItemDataRole.DisplayRole)
+            return str(text) if text is not None else ""
     
     def update_row_data(self, row, data):
-        """Update row with edited data"""
+        """
+        Update row data in virtual model
+        
+        Args:
+            row: Row index to update
+            data: Dictionary with new row data
+        """
+        if not hasattr(self.table, 'get_model'):
+            QMessageBox.critical(self, "Edit Error", "Virtual model not available")
+            return
+        
         try:
-            # Check if tag was actually changed
+            model = self.table.get_model()
+            
+            # Get old tag for comparison
             old_tag = self.get_cell_text(row, 7)
-            tag_changed = (old_tag != data['tag'])
+            tag_changed = (old_tag != data.get('tag', ''))
             
-            # Update websign (special handling)
-            websign_item = self.table.item(row, 0)
-            if websign_item:
-                websign_item.setData(Qt.ItemDataRole.UserRole, data['websign'])
-                if data['websign'].isdigit():
-                    websign_item.setData(Qt.ItemDataRole.DisplayRole, int(data['websign']))
-                else:
-                    websign_item.setText(data['websign'])
+            # Check for websign changes
+            old_websign = self.get_cell_text(row, 0)
+            new_websign = data.get('websign', '')
+            websign_changed = (old_websign != new_websign)
             
-            # Update other fields
-            self.set_cell_text(row, 1, data['author'])
-            self.set_cell_text(row, 2, data['title'])
-            self.set_cell_text(row, 3, data['group'])
-            self.set_cell_text(row, 4, data['show'])
-            self.set_cell_text(row, 5, data['magazine'])
-            self.set_cell_text(row, 6, data['origin'])
-            self.set_cell_text(row, 7, data['tag'])
+            # Update row in virtual model
+            success = model.update_row(row, data)
             
-            # Rebuild websign tracker to update duplicates highlighting
-            self.table_controller.rebuild_websign_tracker()
+            if not success:
+                QMessageBox.critical(self, "Edit Error", "Failed to update row in model")
+                return
             
-            # Update tag cloud if tag data was changed
+            # Rebuild websign tracker if websign was changed
+            if websign_changed and hasattr(self, 'table_controller'):
+                self.table_controller.rebuild_websign_tracker()
+                
+                # If websign changed and there are now duplicates, highlight them
+                if new_websign in self.table_controller.websign_tracker:
+                    duplicate_rows = self.table_controller.websign_tracker[new_websign]
+                    if len(duplicate_rows) > 1:
+                        # The highlighting is already done in rebuild_websign_tracker
+                        print(f"Websign changed to '{new_websign}' - found duplicates at rows: {duplicate_rows}")
+            
+            # Update tag cloud if tag was changed
             if tag_changed:
                 self.update_sidebar_counts()
+            
+            # If in grid view, refresh to show updated data
+            if hasattr(self, 'view_tab_bar') and self.view_tab_bar.currentIndex() == 1:
+                if hasattr(self.grid_view, 'refresh_current_page'):
+                    self.grid_view.refresh_current_page()
             
             QMessageBox.information(self, "Edit", "Row data updated successfully.")
             
         except Exception as e:
             QMessageBox.critical(self, "Edit Error", f"Failed to update row: {str(e)}")
-    
-    def set_cell_text(self, row, column, text):
-        """Set text for specific cell"""
-        item = self.table.item(row, column)
-        if item:
-            item.setText(text)
-        else:
-            new_item = QTableWidgetItem(text)
-            self.table.setItem(row, column, new_item)
+
+    def batch_update_rows(self, updates):
+        """
+        Update multiple rows efficiently
+        
+        Args:
+            updates: Dictionary of {row_index: data_dict} updates
+        """
+        if not hasattr(self.table, 'get_model'):
+            QMessageBox.critical(self, "Update Error", "Virtual model not available")
+            return False
+        
+        try:
+            model = self.table.get_model()
+            
+            # Check if model supports batch updates
+            if hasattr(model, 'batch_update_rows'):
+                success = model.batch_update_rows(updates)
+                
+                if not success:
+                    QMessageBox.critical(self, "Update Error", "Failed to update rows in model")
+                    return False
+            else:
+                # Fallback: update rows individually
+                for row, data in updates.items():
+                    success = model.update_row(row, data)
+                    if not success:
+                        print(f"Warning: Failed to update row {row}")
+            
+            # Rebuild websign tracker to check for new duplicates
+            if hasattr(self, 'table_controller'):
+                self.table_controller.rebuild_websign_tracker()
+            
+            # Update sidebar counts (tags might have changed)
+            self.update_sidebar_counts()
+            
+            # Refresh grid view if active
+            if hasattr(self, 'view_tab_bar') and self.view_tab_bar.currentIndex() == 1:
+                if hasattr(self.grid_view, 'refresh_current_page'):
+                    self.grid_view.refresh_current_page()
+            
+            return True
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Update Error", f"Failed to update rows: {str(e)}")
+            return False
 
     def handle_detail_action(self, action_type, row_data):
         """Handle action requests from detail panel"""
@@ -866,3 +932,30 @@ class MainWindow(QMainWindow):
                 self.on_table_selection_changed()
             except Exception as e:
                 QMessageBox.critical(self, "Action Error", f"Failed to perform action: {str(e)}")
+
+    def get_virtual_model(self):
+        """
+        Safely get the virtual data model
+        
+        Returns:
+            VirtualDataModel or None
+        """
+        if hasattr(self.table, 'get_model'):
+            return self.table.get_model()
+        return None
+
+    def validate_row_index(self, row):
+        """
+        Validate if a row index is within bounds
+        
+        Args:
+            row: Row index to validate
+        
+        Returns:
+            bool: True if valid
+        """
+        model = self.get_virtual_model()
+        if not model:
+            return False
+        
+        return 0 <= row < model.rowCount()
