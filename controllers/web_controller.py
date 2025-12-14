@@ -368,14 +368,7 @@ class WebController:
         for row in rows:
             try:
                 # Existing single row logic
-                websign_item = self.main_window.table.item(row, 0)
-                if not websign_item:
-                    continue
-                    
-                websign = websign_item.data(Qt.ItemDataRole.UserRole)
-                if not websign:
-                    websign = websign_item.text()
-                    
+                websign = self.main_window.get_cell_text(row, 0)
                 if not websign:
                     continue
                     
@@ -403,12 +396,10 @@ class WebController:
         """Complete ZIP image viewing process with delete option for missing files"""
         try:
             # 1. Get websign
-            websign_item = self.main_window.table.item(row, 0)
-            if not websign_item or not websign_item.text():
+            websign = self.main_window.get_cell_text(row, 0)
+            if not websign:
                 QMessageBox.warning(self.main_window, "View Error", "No websign found in selected row.")
                 return
-            
-            websign = websign_item.text()
             
             # 2. Check lib path configuration
             if not self.lib_path_value or not os.path.exists(self.lib_path_value):
@@ -539,7 +530,8 @@ class WebController:
                 progress_text = f"Fetching tags for {len(rows)} items..."
                 progress_dialog = QProgressDialog(progress_text, "Cancel", 0, len(rows), self.main_window)
             else:
-                progress_text = f"Fetching tags for websign {self.get_websign_from_row(rows[0])}..."
+                websign = self.main_window.get_cell_text(rows[0], 0)
+                progress_text = f"Fetching tags for websign {websign}..."
                 progress_dialog = QProgressDialog(progress_text, "Cancel", 0, 0, self.main_window)
             
             progress_dialog.setWindowTitle("Updating Tags" if is_batch else "Updating Tag")
@@ -575,10 +567,10 @@ class WebController:
             tag_item = QTableWidgetItem(tag_text)
             self.main_window.table.setItem(row, 7, tag_item)
             QMessageBox.information(self.main_window, "Update Tag", 
-                                f"Successfully updated tags for websign {self.get_websign_from_row(row)}:\n\n{tag_text}")
+                                f"Successfully updated tags for websign {self.main_window.get_cell_text(row, 0)}:\n\n{tag_text}")
         else:
             QMessageBox.information(self.main_window, "Update Tag", 
-                                f"No tags found for websign {self.get_websign_from_row(row)}")
+                                f"No tags found for websign {self.main_window.get_cell_text(row, 0)}")
 
     def on_batch_tags_finished(self, progress_dialog):
         """Handle batch tag update completion"""
@@ -590,16 +582,6 @@ class WebController:
         progress_dialog.close()
         operation_type = "batch tag update" if is_batch else "tag update"
         QMessageBox.critical(self.main_window, "Update Tag Error", f"Failed to {operation_type}: {error_msg}")
-
-    def get_websign_from_row(self, row):
-        """Helper method to get websign from row"""
-        websign_item = self.main_window.table.item(row, 0)
-        if websign_item:
-            websign = websign_item.data(Qt.ItemDataRole.UserRole)
-            if not websign:
-                websign = websign_item.text()
-            return websign
-        return ""
 
 class WebsiteRefreshThread(QThread):
     """Background thread for website refresh operation"""

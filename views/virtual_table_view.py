@@ -2,7 +2,7 @@
 Virtual Table View optimized for large datasets
 Replaces EnhancedTableWidget with QTableView + VirtualDataModel
 """
-from PyQt6.QtWidgets import QTableView, QHeaderView, QMenu, QApplication
+from PyQt6.QtWidgets import QTableView, QHeaderView, QMenu, QApplication, QAbstractItemView
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QModelIndex
 from PyQt6.QtGui import QAction
 from models.virtual_data_model import VirtualDataModel
@@ -41,6 +41,8 @@ class VirtualTableView(QTableView):
         
         # Connect signals
         self.connect_signals()
+
+        self._is_syncing_selection = False
     
     def init_ui(self):
         """Initialize table view UI with compatibility features"""
@@ -64,27 +66,9 @@ class VirtualTableView(QTableView):
         vertical_header = self.verticalHeader()
         vertical_header.setDefaultSectionSize(24)
         vertical_header.setVisible(True)
-        
-        # Set style
-        self.setStyleSheet("""
-            QTableView {
-                gridline-color: #dee2e6;
-                background-color: white;
-            }
-            QTableView::item {
-                padding: 4px;
-            }
-            QTableView::item:selected {
-                background-color: #e3f2fd;
-                color: black;
-            }
-            QHeaderView::section {
-                background-color: #f8f9fa;
-                padding: 8px;
-                border: 1px solid #dee2e6;
-                font-weight: bold;
-            }
-        """)
+
+        # Disable all editing
+        self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     
     def connect_signals(self):
         """Connect signals for compatibility"""
@@ -412,27 +396,3 @@ class VirtualTableView(QTableView):
     def get_model(self):
         """Get the data model"""
         return self.data_model
-
-    def sync_selection_with_grid(self, grid_selected_rows):
-        """
-        Sync selection with grid view selections
-        
-        Args:
-            grid_selected_rows: Set of row indices selected in grid view
-        """
-        selection_model = self.selectionModel()
-        if not selection_model:
-            return
-        
-        # Clear current selection
-        selection_model.clearSelection()
-        
-        # Select rows that are selected in grid
-        for row in grid_selected_rows:
-            if 0 <= row < self.data_model.rowCount():
-                index = self.model().index(row, 0)
-                selection_model.select(
-                    index,
-                    self.selectionModel().SelectionFlag.Select | 
-                    self.selectionModel().SelectionFlag.Rows
-                )

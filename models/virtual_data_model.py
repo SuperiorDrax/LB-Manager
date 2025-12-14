@@ -409,7 +409,7 @@ class VirtualDataModel(QAbstractTableModel):
         
         return matches
     
-    def _should_row_be_visible(self, row_data: tuple, row_index: int) -> bool:
+    def _should_row_be_visible(self, row_data: tuple, row_index: int = -1) -> bool:
         """
         Check if a row should be visible with all active filters
         

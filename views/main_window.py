@@ -14,7 +14,8 @@ from controllers.web_controller import WebController
 from controllers.table_visual_manager import TableVisualManager
 from views.virtual_table_view import VirtualTableView
 from views.sidebar import Sidebar
-from views.virtualized_grid_view import VirtualizedGridView
+# from views.paged_virtual_grid_view import PagedVirtualGridView
+from views.virtual_grid_view import VirtualGridView
 import os
 import re
 
@@ -47,7 +48,9 @@ class MainWindow(QMainWindow):
         # Step 4: Initialize other UI components
         self.detail_panel = DetailPanel(self)
         self.sidebar = Sidebar(self)
-        self.grid_view = VirtualizedGridView(self)
+        # self.grid_view = PagedVirtualGridView(self)
+        self.grid_view = VirtualGridView(self)
+        self.grid_view.set_main_window_model()
         
         # Add sidebar and detail panel to splitter
         self.main_splitter.insertWidget(0, self.sidebar)
@@ -67,7 +70,8 @@ class MainWindow(QMainWindow):
         self.table_controller.rebuild_websign_tracker()
         self.table_controller.data_added.connect(self.update_sidebar_counts)
         self.table_controller.filter_state_changed.connect(self.on_filter_state_changed)
-        self.grid_view.selection_changed.connect(self.on_grid_selection_changed)
+        # self.grid_view.selection_changed.connect(self.on_grid_selection_changed)
+        self.grid_view.selectionModel().selectionChanged.connect(self.on_grid_selection_changed)
         
         # Step 9: Load saved view preference
         self.load_view_preference()
@@ -189,6 +193,9 @@ class MainWindow(QMainWindow):
         """Complete UI initialization (called after all controllers are created)"""
         # Now add grid view to stack (grid_view is initialized in __init__)
         self.view_stack.addWidget(self.grid_view)
+
+        # CRITICAL: Connect grid view model AFTER table is initialized
+        QTimer.singleShot(200, self._initialize_grid_view)
         
         # Connect table signals
         self.table.doubleClicked.connect(self.on_table_double_click)
@@ -209,9 +216,26 @@ class MainWindow(QMainWindow):
         # Connect sidebar signals
         self.sidebar.status_filter_changed.connect(self.apply_status_filter)
         self.sidebar.filter_reset.connect(self.reset_table_filter)
+
+        # Enable context menu for table view
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self.show_context_menu)
         
         # Update sidebar counts initially
         self.update_sidebar_counts()
+
+    def _initialize_grid_view(self):
+        """Initialize grid view with delay to ensure table is ready"""
+        if hasattr(self.table, 'get_model'):
+            model = self.table.get_model()
+            if model:
+                print(f"[MainWindow] Setting grid view model with {model.rowCount()} rows")
+                
+                # Set model to grid view
+                self.grid_view.setModel(model)
+                
+                # Force initial update
+                QTimer.singleShot(300, self.grid_view.update_visible_items)
     
     def create_menu_bar(self):
         menu_bar = self.menuBar()
@@ -246,13 +270,12 @@ class MainWindow(QMainWindow):
         about_action.triggered.connect(self.show_about_dialog)
 
     def switch_view(self, index):
-        """Switch between table and grid view"""
+        """Switch between table and grid view without synchronization"""
         if index == 0:  # Table view
             self.view_stack.setCurrentIndex(0)
         else:  # Grid view
             self.view_stack.setCurrentIndex(1)
-            # Refresh grid to ensure it's up to date
-            self.grid_view.refresh_current_page()
+            # Grid view automatically handles virtualization
         
         # Save view preference
         self.save_view_preference(index)
@@ -268,29 +291,27 @@ class MainWindow(QMainWindow):
                         item.setSelected(True)
 
     def on_grid_selection_changed(self):
-        """
-        Handle grid view selection changes
-        """
-        if not hasattr(self.grid_view, 'get_selected_rows'):
+        """Handle grid view selection changes"""
+        if not hasattr(self, 'grid_view'):
             return
         
-        # Get selected rows from grid
+        # Get grid selection
         selected_rows = self.grid_view.get_selected_rows()
         
-        # Sync to table selection
-        if hasattr(self.table, 'sync_selection_with_grid'):
-            self.table.sync_selection_with_grid(set(selected_rows))
-        
-        # Update detail panel
         if not selected_rows:
             self.detail_panel.show_empty_state()
-        elif len(selected_rows) > 1:
-            self.detail_panel.show_multiple_selection_state(len(selected_rows))
-            if selected_rows:
-                row_data = self.get_row_data(selected_rows[0])
-                self.detail_panel.update_details(row_data)
-        else:
-            row_data = self.get_row_data(selected_rows[0])
+            return
+        
+        # Update detail panel
+        selected_row = selected_rows[0]
+        row_data = self.get_row_data(selected_row)
+        
+        if row_data:
+            print(f"[DEBUG] Showing details for grid row {selected_row}")
+            
+            if len(selected_rows) > 1:
+                self.detail_panel.show_multiple_selection_state(len(selected_rows))
+            
             self.detail_panel.update_details(row_data)
 
     def load_view_preference(self):
@@ -515,7 +536,34 @@ class MainWindow(QMainWindow):
     
     def keyPressEvent(self, event):
         """Handle keyboard events"""
-        if event.key() == Qt.Key.Key_Delete:
+        if event.key() == Qt.Key.Key_P:
+            # Debug: print layout information
+            print("=" * 50)
+            print(f"Grid size: {self.grid_view.gridSize()}")
+            print(f"Horizontal spacing: {self.grid_view.horizontal_spacing}")
+            print(f"Vertical spacing: {self.grid_view.vertical_spacing}")
+            print(f"Viewport size: {self.grid_view.viewport().size()}")
+            
+            # Call the debug method
+            if hasattr(self.grid_view, 'debug_viewport_info'):
+                self.grid_view.debug_viewport_info()
+            
+            # Calculate actual columns
+            viewport_width = self.grid_view.viewport().width()
+            grid_width = self.grid_view.gridSize().width()
+            if grid_width > 0:
+                columns = max(1, viewport_width // grid_width)
+                print(f"Columns per row: {columns}")
+            
+            # Check first item
+            if (self.grid_view.model() and 
+                self.grid_view.model().rowCount() > 0):
+                index = self.grid_view.model().index(0, 0)
+                rect = self.grid_view.visualRect(index)
+                print(f"First item rect: {rect}")
+            
+            event.accept()
+        elif event.key() == Qt.Key.Key_Delete:
             # Get selected rows
             selected_ranges = self.table.selectedRanges()
             rows_to_delete = set()
@@ -622,6 +670,14 @@ class MainWindow(QMainWindow):
         """Add data to table and update sidebar counts"""
         self.table_controller.add_to_table(data)
         self.update_sidebar_counts()
+        
+        # CRITICAL: Refresh grid view if it's active
+        if (hasattr(self, 'view_tab_bar') and 
+            self.view_tab_bar.currentIndex() == 1 and
+            hasattr(self, 'grid_view')):
+            
+            print("[MainWindow] Refreshing grid view after data addition")
+            QTimer.singleShot(100, self.grid_view.refresh)
 
     def on_filter_state_changed(self, is_filtered):
         """Handle filter state change"""
@@ -634,6 +690,7 @@ class MainWindow(QMainWindow):
         if row >= 0 and row < self.table.rowCount():
             # Show loading indicator
             self.setCursor(Qt.CursorShape.WaitCursor)
+            print('called this func')
             
             try:
                 # Call the same method as right-click "View" option
@@ -651,26 +708,15 @@ class MainWindow(QMainWindow):
         selected_rows = self.get_selected_rows()
         
         if not selected_rows:
-            # No rows selected
             self.detail_panel.show_empty_state()
         elif len(selected_rows) > 1:
-            # Multiple rows selected
             self.detail_panel.show_multiple_selection_state(len(selected_rows))
-            # Show details for first selected row
             if selected_rows:
                 row_data = self.get_row_data(selected_rows[0])
                 self.detail_panel.update_details(row_data)
         else:
-            # Single row selected
             row_data = self.get_row_data(selected_rows[0])
             self.detail_panel.update_details(row_data)
-        
-        # Sync with grid view if in grid mode
-        if hasattr(self, 'view_tab_bar') and self.view_tab_bar.currentIndex() == 1:
-            if hasattr(self.grid_view, 'selected_rows'):
-                self.grid_view.selected_rows = set(selected_rows)
-                if hasattr(self.grid_view, 'refresh_current_page'):
-                    self.grid_view.refresh_current_page()
 
     def get_selected_rows(self):
         """
@@ -959,3 +1005,17 @@ class MainWindow(QMainWindow):
             return False
         
         return 0 <= row < model.rowCount()
+
+    def on_widget_clicked(self, row):
+        """Handle widget click from grid view"""
+        if hasattr(self, 'grid_view'):
+            index = self.grid_view.model().index(row, 0)
+            if index.isValid():
+                self.grid_view.on_item_clicked(index)
+                
+    def on_widget_double_clicked(self, row):
+        """Handle widget double click from grid view"""
+        if hasattr(self, 'grid_view'):
+            index = self.grid_view.model().index(row, 0)
+            if index.isValid():
+                self.grid_view.on_item_double_clicked(index)
