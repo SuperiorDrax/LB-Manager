@@ -233,8 +233,6 @@ class ComicCardDelegate(QStyledItemDelegate):
         
         if event_type == QEvent.Type.MouseButtonPress:
             return self.handle_mouse_press(event, model, index)
-        elif event_type == QEvent.Type.MouseButtonDblClick:
-            return self.handle_double_click(event, model, index)
         elif event_type == QEvent.Type.MouseMove:
             return self.handle_mouse_move(event, model, index)
             

@@ -102,11 +102,6 @@ class VirtualGridView(QListView):
         start_row = max(0, start_row - buffer_grid_y * columns_per_row)
         end_row = min(model.rowCount() - 1, end_row + buffer_grid_y * columns_per_row)
         
-        print(f"[DEBUG] Scroll: {scroll_y}, Viewport: {viewport_height}")
-        print(f"[DEBUG] Virtual Y range: {visible_top_virtual} to {visible_bottom_virtual}")
-        print(f"[DEBUG] Grid Y: {start_grid_y} to {end_grid_y}")
-        print(f"[DEBUG] Visible rows: {start_row} to {end_row}")
-        
         # Create/update widgets
         self._update_widgets_for_rows(start_row, end_row)
         
@@ -118,8 +113,6 @@ class VirtualGridView(QListView):
         
     def _update_widgets_for_rows(self, start_row, end_row):
         """Create or update widgets for specified rows"""
-        print(f"[DEBUG] Updating widgets for rows {start_row} to {end_row}")
-        
         for row in range(start_row, end_row + 1):
             if row not in self._visible_widgets:
                 # Create new widget for this row
@@ -167,8 +160,6 @@ class VirtualGridView(QListView):
         
         # Connect signals
         widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        
-        print(f"[DEBUG] Created widget for row {row} at {rect}")
         
     def _get_row_data(self, row, model):
         """Extract row data from model"""
@@ -237,12 +228,6 @@ class VirtualGridView(QListView):
         index = self.model().index(row, 0)
         if index.isValid():
             self.on_item_clicked(index)
-            
-    def _on_widget_double_clicked(self, row):
-        """Handle widget double click"""
-        index = self.model().index(row, 0)
-        if index.isValid():
-            self.on_item_double_clicked(index)
 
     def update_widget_positions(self):
         """Update positions of all visible widgets"""
@@ -266,15 +251,9 @@ class VirtualGridView(QListView):
                 if widget_visible:
                     widget.setGeometry(rect)
                     widget.show()
-                    
-                    # Debug visibility
-                    if not widget.isVisible():
-                        print(f"[DEBUG WARNING] Widget for row {row} at {rect} not visible!")
                 else:
                     # Widget is far outside viewport, hide it
                     widget.hide()
-                    
-        # print(f"[DEBUG] Updated positions for {len(self._visible_widgets)} widgets")
                 
     def resizeEvent(self, event):
         """
@@ -290,14 +269,11 @@ class VirtualGridView(QListView):
         QTimer.singleShot(100, self.update_visible_items)
         
     def scrollContentsBy(self, dx, dy):
-        """Handle scrolling - override to update widget positions"""
+        """Handle scrolling - update widget positions"""
         super().scrollContentsBy(dx, dy)
         
-        # Immediately update widget positions after scroll
-        self.update_widget_positions()
-        
-        # Also update visible range
-        QTimer.singleShot(10, self.update_visible_items)
+        # Update widget positions after scroll
+        QTimer.singleShot(10, self.update_widget_positions)
         
     def paintEvent(self, event):
         """
@@ -343,17 +319,13 @@ class VirtualGridView(QListView):
         """Simplest click handler - just select the item"""
         if not index.isValid():
             return
-            
-        print(f"[DEBUG CLICK] Simple click on row {index.row()}")
         
         # Just select the clicked item
         self.selectionModel().select(index, 
             self.selectionModel().SelectionFlag.ClearAndSelect)
         
     def on_item_double_clicked(self, index):
-        """
-        Handle item double click to open viewer
-        """
+        """Handle item double click to open viewer"""        
         if not index.isValid():
             return
             
@@ -390,8 +362,6 @@ class VirtualGridView(QListView):
 
     def _on_model_data_changed(self, top_left, bottom_right, roles):
         """Handle data changes in the model"""
-        print(f"[DEBUG] Model data changed: rows {top_left.row()} to {bottom_right.row()}")
-        
         # Update widgets for affected rows
         for row in range(top_left.row(), bottom_right.row() + 1):
             if row in self._visible_widgets:
@@ -406,8 +376,6 @@ class VirtualGridView(QListView):
 
     def _on_rows_inserted(self, parent, first, last):
         """Handle rows being inserted"""
-        print(f"[DEBUG] Rows inserted: {first} to {last}")
-        
         # Clear all widgets and rebuild
         self._clear_all_widgets()
         
@@ -416,8 +384,6 @@ class VirtualGridView(QListView):
 
     def _on_rows_removed(self, parent, first, last):
         """Handle rows being removed"""
-        print(f"[DEBUG] Rows removed: {first} to {last}")
-        
         # Remove widgets for removed rows
         for row in range(first, last + 1):
             if row in self._visible_widgets:
@@ -433,8 +399,6 @@ class VirtualGridView(QListView):
 
     def _on_model_layout_changed(self):
         """Handle layout changes (sorting, filtering)"""
-        print("[DEBUG] Model layout changed")
-        
         # Clear all widgets and rebuild
         self._clear_all_widgets()
         
@@ -457,16 +421,12 @@ class VirtualGridView(QListView):
         scroll_y = self.verticalScrollBar().value()
         adjusted_y = point.y() + scroll_y  # Add scroll offset!
         
-        print(f"[DEBUG INDEXAT] Point: {point}, Scroll: {scroll_y}, Adjusted Y: {adjusted_y}")
-        
         # Calculate which grid cell was clicked (using adjusted Y)
         grid_x = point.x() // self.gridSize().width()
         grid_y = adjusted_y // self.gridSize().height()  # Use adjusted_y!
         
         # Calculate row index
         row = grid_y * columns_per_row + grid_x
-        
-        print(f"[DEBUG INDEXAT] Grid: ({grid_x}, {grid_y}), Row: {row}")
         
         if 0 <= row < self.model().rowCount():
             return self.model().index(row, 0)
@@ -519,21 +479,16 @@ class VirtualGridView(QListView):
         viewport_width = self.viewport().width()
         grid_width = self.gridSize().width()
         
-        # print(f"[DEBUG] Viewport width: {viewport_width}, Grid width: {grid_width}")
-        
         if viewport_width <= 0 or grid_width <= 0:
             return 1
             
         columns = max(1, viewport_width // grid_width)
-        # print(f"[DEBUG] Columns per row: {columns}")
         return columns
 
     def wheelEvent(self, event):
         """
         Handle wheel events with debug
         """
-        print(f"[DEBUG WHEEL] Wheel event: delta={event.angleDelta().y()}, pos={event.position()}")
-        
         # Call parent for actual scrolling
         super().wheelEvent(event)
         
@@ -556,73 +511,39 @@ class VirtualGridView(QListView):
                 rows.add(index.row())  # This is MODEL row index
         
         return sorted(list(rows))
-        
-    def scrollContentsBy(self, dx, dy):
-        """Handle scrolling - block large jumps"""
-        print(f"[DEBUG SCROLL] scrollContentsBy: dx={dx}, dy={dy}")
-        
-        # Block large jumps (like going to top)
-        if abs(dy) > 1000:
-            print(f"[DEBUG BLOCK] Blocking large scroll jump of {dy} pixels")
-            # Still allow small adjustment if needed
-            if abs(dy) > self.viewport().height() * 2:
-                print(f"[DEBUG BLOCK] Completely blocking jump of {dy}")
-                return
-        
-        super().scrollContentsBy(dx, dy)
-        
-        # Update widget positions
-        QTimer.singleShot(10, self.update_widget_positions)
-
-    def verticalScrollbarValueChanged(self, value):
-        """Track scrollbar value changes"""
-        print(f"[DEBUG SCROLLBAR] Value changed to: {value}")
-        super().verticalScrollbarValueChanged(value)
     
     def selectionChanged(self, selected, deselected):
-        """
-        Override selectionChanged - simplified version
-        """
+        """Handle selection changes"""
         super().selectionChanged(selected, deselected)
         
-        # Get current selection
-        current_selection = self.get_selected_rows()
-        
-        # Always notify main window (even for empty selection)
+        # Notify main window
         if hasattr(self.main_window, 'on_grid_selection_changed'):
             self.main_window.on_grid_selection_changed()
 
-    def restore_last_selection(self):
-        """恢复最后的选择"""
-        if hasattr(self, '_last_valid_selection') and self._last_valid_selection:
-            print(f"[DEBUG RESTORE] Restoring selection: {self._last_valid_selection}")
-            
-            self.selectionModel().clearSelection()
-            for row in self._last_valid_selection:
-                index = self.model().index(row, 0)
-                if index.isValid():
-                    self.selectionModel().select(index, 
-                        self.selectionModel().SelectionFlag.Select)
-
-    def mousePressEvent(self, event):
-        """Simple mouse press handling"""
-        # Let QListView handle the basic selection
-        super().mousePressEvent(event)
+    def showEvent(self, event):
+        """Handle show event - load images when grid becomes visible"""
+        super().showEvent(event)
         
-    def mouseReleaseEvent(self, event):
-        """Simple mouse release handling"""
-        super().mouseReleaseEvent(event)
+        # Force update of visible items to load images
+        QTimer.singleShot(50, self._load_visible_images)
 
-    def protect_selection(self):
-        """防止选择被意外清除"""
-        current_selection = self.get_selected_rows()
-        if not current_selection and hasattr(self, '_last_valid_selection'):
-            print(f"[DEBUG PROTECT] Restoring selection: {self._last_valid_selection}")
+    def _load_visible_images(self):
+        """Load images for all visible widgets"""
+        if not self.model():
+            return
             
-            # 恢复最后有效的选择
-            self.selectionModel().clearSelection()
-            for row in self._last_valid_selection:
-                index = self.model().index(row, 0)
-                if index.isValid():
-                    self.selectionModel().select(index, 
-                        self.selectionModel().SelectionFlag.Select)
+        for row, widget in self._visible_widgets.items():
+            if hasattr(widget, 'load_cover_image'):
+                # Schedule image loading
+                QTimer.singleShot(0, widget.load_cover_image)
+
+    def refresh_images(self):
+        """Refresh all visible widget images"""
+        # Reload images for all visible widgets
+        for row, widget in self._visible_widgets.items():
+            if hasattr(widget, 'load_cover_image'):
+                # Use singleShot to prevent UI freezing
+                QTimer.singleShot(0, widget.load_cover_image)
+        
+        # Also update visible items to catch any new widgets
+        self.update_visible_items()

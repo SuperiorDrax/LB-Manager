@@ -454,8 +454,3 @@ class WidgetPool:
         """Handle widget click - forward to main window"""
         if hasattr(self.main_window, 'on_widget_clicked'):
             self.main_window.on_widget_clicked(row)
-            
-    def _on_widget_double_clicked(self, row: int):
-        """Handle widget double click - forward to main window"""
-        if hasattr(self.main_window, 'on_widget_double_clicked'):
-            self.main_window.on_widget_double_clicked(row)

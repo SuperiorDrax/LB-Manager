@@ -198,7 +198,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(200, self._initialize_grid_view)
         
         # Connect table signals
-        self.table.doubleClicked.connect(self.on_table_double_click)
+        self.table.rowDoubleClicked.connect(self.on_table_double_click)
         self.table.itemSelectionChanged.connect(self.on_table_selection_changed)
         
         # Connect column signals
@@ -307,8 +307,6 @@ class MainWindow(QMainWindow):
         row_data = self.get_row_data(selected_row)
         
         if row_data:
-            print(f"[DEBUG] Showing details for grid row {selected_row}")
-            
             if len(selected_rows) > 1:
                 self.detail_panel.show_multiple_selection_state(len(selected_rows))
             
@@ -432,6 +430,30 @@ class MainWindow(QMainWindow):
     
     def filter_table(self, column, search_text):
         self.table_controller.filter_table(column, search_text)
+
+    def update_search_button_behavior(self):
+        """Update search button text based on filter state"""
+        if not hasattr(self, 'search_button'):
+            return
+            
+        # Check if filter is active
+        model = self.table.get_model()
+        if model and hasattr(model, '_filter_active'):
+            if model._filter_active:
+                # Change to "Clear Filter" when filter is active
+                self.search_button.setText("Clear Filter")
+                self.search_button.clicked.disconnect()
+                self.search_button.clicked.connect(self.reset_search_filter)
+            else:
+                # Change back to "Search" when no filter
+                self.search_button.setText("Search")
+                self.search_button.clicked.disconnect()
+                self.search_button.clicked.connect(self.show_search_dialog)
+        else:
+            # Default behavior
+            self.search_button.setText("Search")
+            self.search_button.clicked.disconnect()
+            self.search_button.clicked.connect(self.show_search_dialog)
     
     def clear_table(self):
         """
@@ -536,34 +558,7 @@ class MainWindow(QMainWindow):
     
     def keyPressEvent(self, event):
         """Handle keyboard events"""
-        if event.key() == Qt.Key.Key_P:
-            # Debug: print layout information
-            print("=" * 50)
-            print(f"Grid size: {self.grid_view.gridSize()}")
-            print(f"Horizontal spacing: {self.grid_view.horizontal_spacing}")
-            print(f"Vertical spacing: {self.grid_view.vertical_spacing}")
-            print(f"Viewport size: {self.grid_view.viewport().size()}")
-            
-            # Call the debug method
-            if hasattr(self.grid_view, 'debug_viewport_info'):
-                self.grid_view.debug_viewport_info()
-            
-            # Calculate actual columns
-            viewport_width = self.grid_view.viewport().width()
-            grid_width = self.grid_view.gridSize().width()
-            if grid_width > 0:
-                columns = max(1, viewport_width // grid_width)
-                print(f"Columns per row: {columns}")
-            
-            # Check first item
-            if (self.grid_view.model() and 
-                self.grid_view.model().rowCount() > 0):
-                index = self.grid_view.model().index(0, 0)
-                rect = self.grid_view.visualRect(index)
-                print(f"First item rect: {rect}")
-            
-            event.accept()
-        elif event.key() == Qt.Key.Key_Delete:
+        if event.key() == Qt.Key.Key_Delete:
             # Get selected rows
             selected_ranges = self.table.selectedRanges()
             rows_to_delete = set()
@@ -690,7 +685,6 @@ class MainWindow(QMainWindow):
         if row >= 0 and row < self.table.rowCount():
             # Show loading indicator
             self.setCursor(Qt.CursorShape.WaitCursor)
-            print('called this func')
             
             try:
                 # Call the same method as right-click "View" option

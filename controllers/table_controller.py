@@ -275,59 +275,68 @@ class TableController(QObject):
                 col2_index = column_mapping[col2_name]
         
         # Create custom filter function
-        def text_filter(row_data, row_index):
-            """Filter function that checks text conditions"""
-            # Get cell values
+        def text_filter(row_tuple, row_index):
+            """Filter function that works with tuples directly - more efficient"""
             try:
-                # Get value from column 1
-                if col1_index < len(row_data):
-                    cell_value1 = str(row_data[col1_index])
+                # Get value from column 1 using column index (NO DICT CONVERSION)
+                if col1_index < len(row_tuple):
+                    cell_value1 = row_tuple[col1_index]
+                    cell_value1 = str(cell_value1) if cell_value1 is not None else ""
                 else:
                     return False
                 
-                # Prepare search text
-                if not case_sensitive:
-                    cell_value1_lower = cell_value1.lower()
-                    search_text1_lower = search_text1.lower()
+                # If search text is empty, match everything
+                if not search_text1:
+                    matches_cond1 = True
                 else:
-                    cell_value1_lower = cell_value1
-                    search_text1_lower = search_text1
-                
-                # Check first condition
-                if use_regex:
-                    import re
-                    try:
-                        pattern1 = re.compile(search_text1_lower, 0 if case_sensitive else re.IGNORECASE)
-                        matches_cond1 = pattern1.search(cell_value1_lower) is not None
-                    except re.error:
-                        # Invalid regex, fall back to substring
-                        matches_cond1 = search_text1_lower in cell_value1_lower
-                else:
-                    matches_cond1 = search_text1_lower in cell_value1_lower
-                
-                # Check second condition if present
-                if condition2:
-                    if col2_index < len(row_data):
-                        cell_value2 = str(row_data[col2_index])
-                    else:
-                        return False
-                    
+                    # Prepare search text
                     if not case_sensitive:
-                        cell_value2_lower = cell_value2.lower()
-                        search_text2_lower = search_text2.lower()
+                        cell_value1_lower = cell_value1.lower()
+                        search_text1_lower = search_text1.lower()
                     else:
-                        cell_value2_lower = cell_value2
-                        search_text2_lower = search_text2
+                        cell_value1_lower = cell_value1
+                        search_text1_lower = search_text1
                     
+                    # Check first condition
                     if use_regex:
                         import re
                         try:
-                            pattern2 = re.compile(search_text2_lower, 0 if case_sensitive else re.IGNORECASE)
-                            matches_cond2 = pattern2.search(cell_value2_lower) is not None
+                            pattern1 = re.compile(search_text1_lower, 0 if case_sensitive else re.IGNORECASE)
+                            matches_cond1 = pattern1.search(cell_value1_lower) is not None
                         except re.error:
-                            matches_cond2 = search_text2_lower in cell_value2_lower
+                            # Invalid regex, fall back to substring
+                            matches_cond1 = search_text1_lower in cell_value1_lower
                     else:
-                        matches_cond2 = search_text2_lower in cell_value2_lower
+                        matches_cond1 = search_text1_lower in cell_value1_lower
+                
+                # Check second condition if present
+                if condition2:
+                    if col2_index < len(row_tuple):
+                        cell_value2 = row_tuple[col2_index]
+                        cell_value2 = str(cell_value2) if cell_value2 is not None else ""
+                    else:
+                        return False
+                    
+                    # If search text is empty, match everything
+                    if not search_text2:
+                        matches_cond2 = True
+                    else:
+                        if not case_sensitive:
+                            cell_value2_lower = cell_value2.lower()
+                            search_text2_lower = search_text2.lower()
+                        else:
+                            cell_value2_lower = cell_value2
+                            search_text2_lower = search_text2
+                        
+                        if use_regex:
+                            import re
+                            try:
+                                pattern2 = re.compile(search_text2_lower, 0 if case_sensitive else re.IGNORECASE)
+                                matches_cond2 = pattern2.search(cell_value2_lower) is not None
+                            except re.error:
+                                matches_cond2 = search_text2_lower in cell_value2_lower
+                        else:
+                            matches_cond2 = search_text2_lower in cell_value2_lower
                     
                     # Apply logic
                     if logic == 'AND':
@@ -339,7 +348,6 @@ class TableController(QObject):
                     
             except Exception as e:
                 print(f"Error in filter function: {e}")
-                return False
         
         # Apply the filter
         if hasattr(model, 'apply_advanced_filter'):

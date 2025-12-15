@@ -14,18 +14,23 @@ class VirtualTableView(QTableView):
     Virtual table view with three-state sorting and full compatibility
     with existing architecture components
     """
-    
     # Signals for compatibility with existing code
     itemSelectionChanged = pyqtSignal()  # Compat with QTableWidget signal
-    doubleClicked = pyqtSignal(QModelIndex)  # Compat signal
+    rowDoubleClicked = pyqtSignal(QModelIndex)  # Compat signal
     
-    def __init__(self, parent=None):
+    def __init__(self, main_window=None, parent=None):
         super().__init__(parent)
+        self.main_window = main_window
         
         # Initialize data model
         self.data_model = VirtualDataModel()
         self.setModel(self.data_model)
         
+        # ENABLE SORTING
+        self.setSortingEnabled(True)
+        self.horizontalHeader().setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
+        self.horizontalHeader().sortIndicatorChanged.connect(self._on_sort_indicator_changed)
+
         # Sorting state tracking
         self.sort_states = {}  # column_index -> "none", "asc", "desc"
         self.current_sort_column = -1
@@ -42,7 +47,7 @@ class VirtualTableView(QTableView):
         # Connect signals
         self.connect_signals()
 
-        self._is_syncing_selection = False
+        self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     
     def init_ui(self):
         """Initialize table view UI with compatibility features"""
@@ -66,9 +71,6 @@ class VirtualTableView(QTableView):
         vertical_header = self.verticalHeader()
         vertical_header.setDefaultSectionSize(24)
         vertical_header.setVisible(True)
-
-        # Disable all editing
-        self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     
     def connect_signals(self):
         """Connect signals for compatibility"""
@@ -79,9 +81,9 @@ class VirtualTableView(QTableView):
         
         # Connect selection change with debouncing
         self.selectionModel().selectionChanged.connect(self._on_selection_changed_debounced)
-        
-        # Connect double click
-        self.doubleClicked.connect(self._handle_double_click)
+
+        # Header click for sorting
+        self.horizontalHeader().sectionClicked.connect(self.on_header_clicked)
     
     # ==================== Data Management (Compatibility Layer) ====================
     
@@ -137,6 +139,24 @@ class VirtualTableView(QTableView):
         
         # Apply the new sorting state
         self.apply_sort(logical_index, new_state)
+
+    def mouseDoubleClickEvent(self, event):
+        """Handle mouse double-click"""
+        index = self.indexAt(event.pos())
+        
+        if index.isValid():
+            # Emit signal (will be connected to main_window handler)
+            self.rowDoubleClicked.emit(index)
+            event.accept()
+        else:
+            super().mouseDoubleClickEvent(event)
+
+    def _on_selection_changed(self, selected, deselected):
+        """
+        Handle selection changes
+        """
+        # Simply emit the signal
+        self.itemSelectionChanged.emit()
     
     def apply_sort(self, column, sort_state):
         """
@@ -212,10 +232,6 @@ class VirtualTableView(QTableView):
         """Emit selection changed signal after debouncing"""
         self.itemSelectionChanged.emit()
     
-    def _handle_double_click(self, index):
-        """Handle double click event"""
-        self.doubleClicked.emit(index)
-    
     def get_selected_rows(self):
         """
         Get all selected row indices
@@ -288,6 +304,21 @@ class VirtualTableView(QTableView):
         # This signal will be connected to state_manager.on_column_moved
         if hasattr(self.parent(), 'state_manager'):
             self.parent().state_manager.on_column_moved(logical_index, old_visual_index, new_visual_index)
+    
+    # ==================== Sort Integration ====================
+
+    def showEvent(self, event):
+        """Ensure no sort indicator on show"""
+        super().showEvent(event)
+        
+        # Double-check sort indicator is clear
+        QTimer.singleShot(50, lambda: self.horizontalHeader().setSortIndicator(-1, Qt.SortOrder.AscendingOrder))
+
+    def _on_sort_indicator_changed(self, logicalIndex, order):
+        """Only set sort indicator when user explicitly clicks"""
+        # -1 means no sort indicator
+        if logicalIndex == -1:
+            return
     
     # ==================== Filter Integration ====================
     

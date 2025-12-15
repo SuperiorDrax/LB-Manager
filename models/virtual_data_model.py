@@ -303,6 +303,125 @@ class VirtualDataModel(QAbstractTableModel):
         if visible_row < 0 or visible_row >= len(self._visible_rows):
             return -1
         return self._visible_rows[visible_row]
+
+    # ==================== Sorting ====================
+
+    def sort(self, column, order):
+        """
+        Sort data by specified column
+        
+        Args:
+            column: Column index to sort by (0-based)
+            order: Qt.SortOrder.AscendingOrder or Qt.SortOrder.DescendingOrder
+        """
+        # Emit signal that layout is about to change
+        self.layoutAboutToBeChanged.emit()
+        
+        try:
+            # Get column info
+            if column >= len(self.COLUMNS):
+                print(f"[ERROR] Invalid column index: {column}")
+                return
+                
+            column_name = self.COLUMNS[column]['name']
+            column_type = self.COLUMNS[column]['type']
+            
+            # Define sort key function based on column type
+            def sort_key(row_idx):
+                """Extract value for sorting from tuple data"""
+                tuple_data = self._raw_data[row_idx]
+                
+                if column >= len(tuple_data):
+                    # Return appropriate default based on column
+                    if column == 0:  # websign
+                        return 0  # Default to 0 for int columns
+                    elif column_type == 'progress':
+                        return 0
+                    elif column_type == 'status':
+                        return 0  # unread
+                    else:
+                        return ""
+                    
+                value = tuple_data[column]
+                
+                # Special handling for websign column (column 0)
+                if column == 0:  # websign column
+                    # Treat as integer
+                    try:
+                        if value is None or value == "":
+                            return 0
+                        # Convert to int
+                        return int(value)
+                    except (ValueError, TypeError):
+                        # If can't convert to int, try to extract numbers from string
+                        try:
+                            import re
+                            numbers = re.findall(r'\d+', str(value))
+                            if numbers:
+                                return int(numbers[0])
+                            return 0
+                        except:
+                            return 0
+                
+                # Handle different column types for other columns
+                elif column_type == 'progress':
+                    # Sort numerically for progress
+                    try:
+                        return int(value) if value is not None else 0
+                    except (ValueError, TypeError):
+                        return 0
+                        
+                elif column_type == 'status':
+                    # Sort by status order: unread < reading < completed
+                    status_order = {'unread': 0, 'reading': 1, 'completed': 2}
+                    status = str(value).lower() if value else 'unread'
+                    return status_order.get(status, 3)
+                    
+                else:  # 'str' type or others
+                    # String comparison (case-insensitive)
+                    if value is None:
+                        return ""
+                    elif isinstance(value, (int, float)):
+                        # For numeric values in string columns
+                        return str(value).zfill(10)  # Pad with zeros for proper numeric sorting
+                    else:
+                        return str(value).lower()
+            
+            # Determine what to sort
+            if self._filter_active:
+                # When filtering, we need to sort the actual data array
+                all_indices = list(range(len(self._raw_data)))
+                
+                # Sort all data
+                reverse = (order == Qt.SortOrder.DescendingOrder)
+                all_indices.sort(key=sort_key, reverse=reverse)
+                
+                # Reorder raw data
+                self._raw_data = [self._raw_data[i] for i in all_indices]
+                
+                # Rebuild visible rows (will respect filters)
+                self._rebuild_visible_rows()
+                
+            else:
+                # No filter - sort visible rows (which are all rows)
+                rows_to_sort = self._visible_rows.copy()
+                
+                reverse = (order == Qt.SortOrder.DescendingOrder)
+                rows_to_sort.sort(key=sort_key, reverse=reverse)
+                
+                # Update visible rows order
+                self._visible_rows = rows_to_sort
+            
+            # Clear caches since order changed
+            self._display_cache.clear()
+            self._user_data_cache.clear()
+            self._sort_cache.clear()
+            
+        except Exception as e:
+            print(f"[ERROR] Sorting failed: {e}")
+        
+        # Emit signal that layout has changed
+        self.layoutChanged.emit()
     
     # ==================== Filtering ====================
     
@@ -446,8 +565,7 @@ class VirtualDataModel(QAbstractTableModel):
         
         # Check custom filter
         if self._custom_filter_active and hasattr(self, '_custom_filter') and self._custom_filter:
-            row_dict = self._tuple_to_dict(row_data)
-            if not self._custom_filter(row_dict, row_index):
+            if not self._custom_filter(row_data, row_index):
                 return False
         
         return True
