@@ -20,17 +20,16 @@ class VirtualTableView(QTableView):
     
     def __init__(self, main_window=None, parent=None):
         super().__init__(parent)
-        self.main_window = main_window
+        self.main_window = main_window  # Store reference to main_window
         
         # Initialize data model
         self.data_model = VirtualDataModel()
         self.setModel(self.data_model)
         
-        # ENABLE SORTING
-        self.setSortingEnabled(True)
+        # Disable built-in sorting, use custom three-state sorting
+        self.setSortingEnabled(False)
         self.horizontalHeader().setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
-        self.horizontalHeader().sortIndicatorChanged.connect(self._on_sort_indicator_changed)
-
+        
         # Sorting state tracking
         self.sort_states = {}  # column_index -> "none", "asc", "desc"
         self.current_sort_column = -1
@@ -44,10 +43,22 @@ class VirtualTableView(QTableView):
         # Initialize UI
         self.init_ui()
         
-        # Connect signals
-        self.connect_signals()
+        # Delay signal connection to ensure parent is set
+        QTimer.singleShot(0, self.delayed_setup)
 
-        self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+    def delayed_setup(self):
+        """Delayed setup to ensure parent and main_window are properly set"""
+        if self.main_window:
+            # Connect signals directly to main_window's state_manager
+            self.horizontalHeader().sectionResized.connect(
+                self.main_window.state_manager.on_column_resized
+            )
+            self.horizontalHeader().sectionMoved.connect(
+                self.main_window.state_manager.on_column_moved
+            )
+        
+        # Connect other signals
+        self.connect_signals()
     
     def init_ui(self):
         """Initialize table view UI with compatibility features"""
@@ -55,13 +66,15 @@ class VirtualTableView(QTableView):
         self.setAlternatingRowColors(True)
         self.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.setSelectionMode(QTableView.SelectionMode.ExtendedSelection)
-        self.setSortingEnabled(True)
         
         # Configure header
         header = self.horizontalHeader()
         header.setSectionsMovable(True)  # Allow column reordering
         header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         header.setStretchLastSection(False)
+        
+        # Connect header click signal to custom sorting
+        header.sectionClicked.connect(self.on_header_clicked)
         
         # Set default column widths from model
         for i, col_def in enumerate(self.data_model.COLUMNS):
@@ -74,29 +87,13 @@ class VirtualTableView(QTableView):
     
     def connect_signals(self):
         """Connect signals for compatibility"""
-        # Connect header signals
+        # Connect header context menu signal
         self.horizontalHeader().customContextMenuRequested.connect(self.show_header_context_menu)
-        self.horizontalHeader().sectionResized.connect(self.on_column_resized)
-        self.horizontalHeader().sectionMoved.connect(self.on_column_moved)
         
-        # Connect selection change with debouncing
+        # Selection change signal (with debouncing)
         self.selectionModel().selectionChanged.connect(self._on_selection_changed_debounced)
-
-        # Header click for sorting
-        self.horizontalHeader().sectionClicked.connect(self.on_header_clicked)
     
-    # ==================== Data Management (Compatibility Layer) ====================
-    
-    def setColumnCount(self, count: int):
-        """Compatibility method - column count is managed by model"""
-        # Column count is fixed by model, this is a no-op for compatibility
-        pass
-    
-    def setHorizontalHeaderLabels(self, labels):
-        """Compatibility method - header labels are managed by model"""
-        # Header labels are managed by model, this is a no-op for compatibility
-        pass
-    
+    # ==================== Data Management (Compatibility Layer) ====================        
     def rowCount(self):
         """Get visible row count from virtual model"""
         return self.data_model.rowCount()
@@ -113,12 +110,6 @@ class VirtualTableView(QTableView):
     def clear(self):
         """Clear all data from table"""
         self.data_model.clear_all_data()
-    
-    def insertRow(self, row):
-        """Compatibility method - use add_row_data instead"""
-        # This is a simplified compatibility method
-        # Actual insertion should use add_row_data
-        pass
     
     # ==================== Sorting Implementation ====================
     
@@ -291,20 +282,6 @@ class VirtualTableView(QTableView):
         """Toggle visibility of a specific column"""
         self.setColumnHidden(column_index, not visible)
     
-    # ==================== State Management Integration ====================
-    
-    def on_column_resized(self, logical_index, old_size, new_size):
-        """Handle column resize for state manager"""
-        # This signal will be connected to state_manager.on_column_resized
-        if hasattr(self.parent(), 'state_manager'):
-            self.parent().state_manager.on_column_resized(logical_index, old_size, new_size)
-    
-    def on_column_moved(self, logical_index, old_visual_index, new_visual_index):
-        """Handle column move for state manager"""
-        # This signal will be connected to state_manager.on_column_moved
-        if hasattr(self.parent(), 'state_manager'):
-            self.parent().state_manager.on_column_moved(logical_index, old_visual_index, new_visual_index)
-    
     # ==================== Sort Integration ====================
 
     def showEvent(self, event):
@@ -333,50 +310,6 @@ class VirtualTableView(QTableView):
     def reset_table_filter(self):
         """Reset table filter to show all rows"""
         self.data_model.clear_filters()
-    
-    def update_sidebar_counts(self):
-        """Update sidebar counts - compatibility method"""
-        # This will be implemented when integrating with main_window
-        pass
-    
-    # ==================== Data Access (Compatibility Methods) ====================
-    
-    def item(self, row, column):
-        """
-        Minimal compatibility method - returns None
-        
-        Note: In virtual model, data should be accessed through model.data()
-        This method exists only to prevent crashes in existing code.
-        """
-        return None  # Force code to use model.data() instead
-    
-    def setItem(self, row, column, item):
-        """
-        Compatibility method - data should be set through model.setData()
-        
-        Note: This method does nothing in virtual model.
-        Data must be updated through model.setData() or model.update_row()
-        """
-        # No-op - data must be updated through model
-        pass
-    
-    def isRowHidden(self, row):
-        """
-        Compatibility method - rows are filtered at model level in virtual model
-        
-        Note: In virtual model, filtered rows are not in the visible rows list at all.
-        So if the row index is within range, it's visible.
-        """
-        if row < 0 or row >= self.data_model.rowCount():
-            return True  # Out of range rows are "hidden"
-        return False  # All rows in range are visible in virtual model
-    
-    def setRowHidden(self, row, hide):
-        """
-        Compatibility method - rows are filtered at model level
-        """
-        # Rows are filtered at model level, not view level
-        pass
     
     # ==================== Performance Methods ====================
     
@@ -427,3 +360,18 @@ class VirtualTableView(QTableView):
     def get_model(self):
         """Get the data model"""
         return self.data_model
+
+    def clear_highlights(self):
+        """Clear all highlighting from the table"""
+        # Clear any custom styling
+        # Clear row styles in model
+        self.data_model._row_styles.clear()
+        
+        # Trigger repaint
+        self.viewport().update()
+
+    def clear_duplicate_highlight(self, row):
+        """Clear highlight for specific row"""
+        if row in self.data_model._row_styles:
+            del self.data_model._row_styles[row]
+            self.viewport().update()

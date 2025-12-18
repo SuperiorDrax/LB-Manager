@@ -130,8 +130,8 @@ class MainWindow(QMainWindow):
         table_layout.setContentsMargins(10, 10, 10, 10)
         table_layout.setSpacing(10)
         
-        # Create virtual table
-        self.table = VirtualTableView()
+        # FIX: Create virtual table with main_window reference
+        self.table = VirtualTableView(main_window=self)
         
         # Set column widths
         self.table.setColumnWidth(0, 80)   # websign
@@ -226,16 +226,15 @@ class MainWindow(QMainWindow):
 
     def _initialize_grid_view(self):
         """Initialize grid view with delay to ensure table is ready"""
-        if hasattr(self.table, 'get_model'):
-            model = self.table.get_model()
-            if model:
-                print(f"[MainWindow] Setting grid view model with {model.rowCount()} rows")
-                
-                # Set model to grid view
-                self.grid_view.setModel(model)
-                
-                # Force initial update
-                QTimer.singleShot(300, self.grid_view.update_visible_items)
+        model = self.table.get_model()
+        if model:
+            print(f"[MainWindow] Setting grid view model with {model.rowCount()} rows")
+            
+            # Set model to grid view
+            self.grid_view.setModel(model)
+            
+            # Force initial update
+            QTimer.singleShot(300, self.grid_view.update_visible_items)
     
     def create_menu_bar(self):
         menu_bar = self.menuBar()
@@ -280,21 +279,8 @@ class MainWindow(QMainWindow):
         # Save view preference
         self.save_view_preference(index)
 
-    def sync_selection_to_table(self, selected_rows):
-        """Sync selection from grid to table"""
-        self.table.clearSelection()
-        for row in selected_rows:
-            if row < self.table.rowCount():
-                for col in range(self.table.columnCount()):
-                    item = self.table.item(row, col)
-                    if item:
-                        item.setSelected(True)
-
     def on_grid_selection_changed(self):
         """Handle grid view selection changes"""
-        if not hasattr(self, 'grid_view'):
-            return
-        
         # Get grid selection
         selected_rows = self.grid_view.get_selected_rows()
         
@@ -433,31 +419,22 @@ class MainWindow(QMainWindow):
 
     def update_search_button_behavior(self):
         """Update search button text based on filter state"""
-        if not hasattr(self, 'search_button'):
-            return
-            
         # Check if filter is active
         model = self.table.get_model()
-        if model and hasattr(model, '_filter_active'):
-            if model._filter_active:
-                # Change to "Clear Filter" when filter is active
-                self.search_button.setText("Clear Filter")
-                self.search_button.clicked.disconnect()
-                self.search_button.clicked.connect(self.reset_search_filter)
-            else:
-                # Change back to "Search" when no filter
-                self.search_button.setText("Search")
-                self.search_button.clicked.disconnect()
-                self.search_button.clicked.connect(self.show_search_dialog)
+        if model._filter_active:
+            # Change to "Clear Filter" when filter is active
+            self.search_button.setText("Clear Filter")
+            self.search_button.clicked.disconnect()
+            self.search_button.clicked.connect(self.reset_search_filter)
         else:
-            # Default behavior
+            # Change back to "Search" when no filter
             self.search_button.setText("Search")
             self.search_button.clicked.disconnect()
             self.search_button.clicked.connect(self.show_search_dialog)
     
     def clear_table(self):
         """
-        Clear all data from virtual table
+        Clear ALL data from virtual table
         """
         reply = QMessageBox.question(
             self, 
@@ -467,12 +444,22 @@ class MainWindow(QMainWindow):
         )
         
         if reply == QMessageBox.StandardButton.Yes:
-            # Clear virtual table
-            self.table.clear()
+            # Clear model data
+            model = self.table.get_model()
+            model.clear_all_data()
             
-            # Clear grid view
-            if hasattr(self.grid_view, 'refresh_current_page'):
-                self.grid_view.refresh_current_page()
+            # CRITICAL: Clear the websign tracker
+            self.table_controller.websign_tracker.clear()
+            
+            # Also clear any duplicate highlighting
+            self.table_controller.clear_duplicate_highlights()
+            
+            # Force view updates
+            self.table.viewport().update()
+            
+            # Clear grid view if it exists
+            self.grid_view._clear_all_widgets()
+            QTimer.singleShot(50, self.grid_view.update_visible_items)
             
             # Update sidebar counts
             self.update_sidebar_counts()
@@ -537,38 +524,24 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         """Ensure thread is properly cleaned up and save layout"""
         # Save panel layout
-        if hasattr(self, 'state_manager'):
-            self.state_manager.save_panel_layout()
-        
-        if hasattr(self, 'refresh_thread') and self.refresh_thread.isRunning():
-            self.refresh_thread.terminate()
-            self.refresh_thread.wait()
+        self.state_manager.save_panel_layout()
         event.accept()
 
     def resizeEvent(self, event):
         """Handle window resize"""
         super().resizeEvent(event)
         # Debounced save of window state
-        if hasattr(self, 'save_state_timer'):
-            self.save_state_timer.start(500)  # Save after 500ms of no resizing
-        else:
-            self.save_state_timer = QTimer()
-            self.save_state_timer.setSingleShot(True)
-            self.save_state_timer.timeout.connect(self.state_manager.save_window_state)
+        self.save_state_timer = QTimer()
+        self.save_state_timer.setSingleShot(True)
+        self.save_state_timer.timeout.connect(self.state_manager.save_window_state)
     
     def keyPressEvent(self, event):
         """Handle keyboard events"""
         if event.key() == Qt.Key.Key_Delete:
-            # Get selected rows
-            selected_ranges = self.table.selectedRanges()
-            rows_to_delete = set()
-            
-            for selection_range in selected_ranges:
-                for row in range(selection_range.topRow(), selection_range.bottomRow() + 1):
-                    rows_to_delete.add(row)
-            
+            # Get selected rows using VirtualTableView's built-in method
+            rows_to_delete = self.table.get_selected_rows()
             if rows_to_delete:
-                self.visual_manager.delete_rows(list(rows_to_delete))
+                self.visual_manager.delete_rows(rows_to_delete)
             event.accept()
         elif event.key() == Qt.Key.Key_F and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
             # Ctrl+F to open search dialog
@@ -580,7 +553,7 @@ class MainWindow(QMainWindow):
     def update_read_status(self, row, status):
         """Update read status for specified row"""
         try:
-            read_status_item = self.table.item(row, 8)
+            read_status_item = self.get_cell_text(row, 8)
             if read_status_item:
                 read_status_item.setData(Qt.ItemDataRole.UserRole, status)
                 read_status_item.setText(self.table_controller.get_read_status_display(status))
@@ -602,10 +575,6 @@ class MainWindow(QMainWindow):
         """
         self.table.apply_status_filter(status)
         self.update_sidebar_counts()
-        
-        # Invalidate grid view cache
-        if hasattr(self.grid_view, 'invalidate_caches'):
-            self.grid_view.invalidate_caches()
 
     def reset_table_filter(self):
         """
@@ -613,18 +582,11 @@ class MainWindow(QMainWindow):
         """
         self.table.reset_table_filter()
         self.update_sidebar_counts()
-        
-        # Invalidate grid view cache
-        if hasattr(self.grid_view, 'invalidate_caches'):
-            self.grid_view.invalidate_caches()
     
     def update_sidebar_counts(self):
         """
         Update sidebar with current statistics from virtual model
         """
-        if not hasattr(self.table, 'get_model'):
-            return
-        
         model = self.table.get_model()
         
         # Get statistics directly from model
@@ -644,10 +606,6 @@ class MainWindow(QMainWindow):
         """
         self.table.apply_tag_filter(selected_tags)
         self.update_sidebar_counts()
-        
-        # Invalidate grid view cache
-        if hasattr(self.grid_view, 'invalidate_caches'):
-            self.grid_view.invalidate_caches()
 
     def get_current_status_filter(self):
         """Get currently selected status filter"""
@@ -660,19 +618,6 @@ class MainWindow(QMainWindow):
         elif self.sidebar.completed_btn.isChecked():
             return "completed"
         return "all"
-
-    def add_data_to_table(self, data):
-        """Add data to table and update sidebar counts"""
-        self.table_controller.add_to_table(data)
-        self.update_sidebar_counts()
-        
-        # CRITICAL: Refresh grid view if it's active
-        if (hasattr(self, 'view_tab_bar') and 
-            self.view_tab_bar.currentIndex() == 1 and
-            hasattr(self, 'grid_view')):
-            
-            print("[MainWindow] Refreshing grid view after data addition")
-            QTimer.singleShot(100, self.grid_view.refresh)
 
     def on_filter_state_changed(self, is_filtered):
         """Handle filter state change"""
@@ -719,21 +664,6 @@ class MainWindow(QMainWindow):
         Returns:
             List[int]: List of selected row indices (sorted)
         """
-        if not hasattr(self.table, 'get_selected_rows'):
-            # Fallback for compatibility
-            selected_rows = set()
-            model = self.table.get_model()
-            
-            for row in range(model.rowCount()):
-                # Check if any cell in the row is selected
-                for col in range(model.columnCount()):
-                    index = model.index(row, col)
-                    if self.table.selectionModel().isSelected(index):
-                        selected_rows.add(row)
-                        break
-            
-            return sorted(list(selected_rows))
-        
         # Use VirtualTableView's built-in method
         return self.table.get_selected_rows()
 
@@ -794,9 +724,6 @@ class MainWindow(QMainWindow):
         Returns:
             dict: Row data as dictionary
         """
-        if not hasattr(self.table, 'get_model'):
-            return {}
-        
         model = self.table.get_model()
         if visible_row < 0 or visible_row >= model.rowCount():
             return {}
@@ -814,9 +741,6 @@ class MainWindow(QMainWindow):
         Returns:
             str: Cell text
         """
-        if not hasattr(self.table, 'get_model'):
-            return ""
-        
         model = self.table.get_model()
         if row < 0 or row >= model.rowCount() or column < 0 or column >= model.columnCount():
             return ""
@@ -849,10 +773,6 @@ class MainWindow(QMainWindow):
             row: Row index to update
             data: Dictionary with new row data
         """
-        if not hasattr(self.table, 'get_model'):
-            QMessageBox.critical(self, "Edit Error", "Virtual model not available")
-            return
-        
         try:
             model = self.table.get_model()
             
@@ -873,7 +793,7 @@ class MainWindow(QMainWindow):
                 return
             
             # Rebuild websign tracker if websign was changed
-            if websign_changed and hasattr(self, 'table_controller'):
+            if websign_changed:
                 self.table_controller.rebuild_websign_tracker()
                 
                 # If websign changed and there are now duplicates, highlight them
@@ -888,9 +808,8 @@ class MainWindow(QMainWindow):
                 self.update_sidebar_counts()
             
             # If in grid view, refresh to show updated data
-            if hasattr(self, 'view_tab_bar') and self.view_tab_bar.currentIndex() == 1:
-                if hasattr(self.grid_view, 'refresh_current_page'):
-                    self.grid_view.refresh_current_page()
+            if self.view_tab_bar.currentIndex() == 1:
+                self.grid_view.refresh_current_page()
             
             QMessageBox.information(self, "Edit", "Row data updated successfully.")
             
@@ -904,38 +823,21 @@ class MainWindow(QMainWindow):
         Args:
             updates: Dictionary of {row_index: data_dict} updates
         """
-        if not hasattr(self.table, 'get_model'):
-            QMessageBox.critical(self, "Update Error", "Virtual model not available")
-            return False
-        
         try:
             model = self.table.get_model()
             
             # Check if model supports batch updates
-            if hasattr(model, 'batch_update_rows'):
-                success = model.batch_update_rows(updates)
+            success = model.batch_update_rows(updates)
                 
-                if not success:
-                    QMessageBox.critical(self, "Update Error", "Failed to update rows in model")
-                    return False
-            else:
-                # Fallback: update rows individually
-                for row, data in updates.items():
-                    success = model.update_row(row, data)
-                    if not success:
-                        print(f"Warning: Failed to update row {row}")
+            if not success:
+                QMessageBox.critical(self, "Update Error", "Failed to update rows in model")
+                return False
             
             # Rebuild websign tracker to check for new duplicates
-            if hasattr(self, 'table_controller'):
-                self.table_controller.rebuild_websign_tracker()
+            self.table_controller.rebuild_websign_tracker()
             
             # Update sidebar counts (tags might have changed)
             self.update_sidebar_counts()
-            
-            # Refresh grid view if active
-            if hasattr(self, 'view_tab_bar') and self.view_tab_bar.currentIndex() == 1:
-                if hasattr(self.grid_view, 'refresh_current_page'):
-                    self.grid_view.refresh_current_page()
             
             return True
             
@@ -980,9 +882,7 @@ class MainWindow(QMainWindow):
         Returns:
             VirtualDataModel or None
         """
-        if hasattr(self.table, 'get_model'):
-            return self.table.get_model()
-        return None
+        return self.table.get_model()
 
     def validate_row_index(self, row):
         """
@@ -1002,14 +902,12 @@ class MainWindow(QMainWindow):
 
     def on_widget_clicked(self, row):
         """Handle widget click from grid view"""
-        if hasattr(self, 'grid_view'):
-            index = self.grid_view.model().index(row, 0)
-            if index.isValid():
-                self.grid_view.on_item_clicked(index)
+        index = self.grid_view.model().index(row, 0)
+        if index.isValid():
+            self.grid_view.on_item_clicked(index)
                 
     def on_widget_double_clicked(self, row):
         """Handle widget double click from grid view"""
-        if hasattr(self, 'grid_view'):
-            index = self.grid_view.model().index(row, 0)
-            if index.isValid():
-                self.grid_view.on_item_double_clicked(index)
+        index = self.grid_view.model().index(row, 0)
+        if index.isValid():
+            self.grid_view.on_item_double_clicked(index)

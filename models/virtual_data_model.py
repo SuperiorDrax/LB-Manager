@@ -165,7 +165,7 @@ class VirtualDataModel(QAbstractTableModel):
         Returns:
             QBrush or QVariant: Style data
         """
-        if not hasattr(self, '_row_styles') or actual_row not in self._row_styles:
+        if actual_row not in self._row_styles:
             return QVariant()
         
         row_style = self._row_styles[actual_row]
@@ -269,23 +269,36 @@ class VirtualDataModel(QAbstractTableModel):
         self._invalidate_caches()
     
     def remove_row(self, row: int) -> None:
-        """Remove a row by visible index"""
+        """Remove a row by visible index - completely remove from raw data"""
         if row < 0 or row >= len(self._visible_rows):
-            return
+            return False
         
         actual_row = self._visible_rows[row]
         
-        # Remove from raw data
-        if 0 <= actual_row < len(self._raw_data):
-            # Mark as removed (we'll just filter it out)
-            self.beginRemoveRows(QModelIndex(), row, row)
-            del self._visible_rows[row]
-            self.endRemoveRows()
-            
-            # Note: We don't actually remove from _raw_data to preserve indices
-            # Instead, we'll filter it out in _should_row_be_visible
+        # Notify view that we're about to remove rows
+        self.beginRemoveRows(QModelIndex(), row, row)
         
+        # Remove from visible rows
+        del self._visible_rows[row]
+        
+        # COMPLETE REMOVAL: Remove from raw data entirely
+        if 0 <= actual_row < len(self._raw_data):
+            del self._raw_data[actual_row]
+            
+            # IMPORTANT: Adjust indices in _visible_rows for rows after the deleted one
+            for i in range(len(self._visible_rows)):
+                if self._visible_rows[i] > actual_row:
+                    self._visible_rows[i] -= 1
+        
+        self.endRemoveRows()
+        
+        # Update row count
+        self._row_count = len(self._raw_data)
+        
+        # Invalidate caches
         self._invalidate_caches()
+        
+        return True
     
     def get_row_data(self, visible_row: int) -> Dict[str, Any]:
         """Get row data as dictionary"""
@@ -498,7 +511,7 @@ class VirtualDataModel(QAbstractTableModel):
         if not self._text_filter_active:
             return True
         
-        if not hasattr(self, '_text_filter_options') or not self._text_filter_options:
+        if not self._text_filter_options:
             return True
         
         # Get search options
@@ -564,7 +577,7 @@ class VirtualDataModel(QAbstractTableModel):
                 return False
         
         # Check custom filter
-        if self._custom_filter_active and hasattr(self, '_custom_filter') and self._custom_filter:
+        if self._custom_filter_active and self._custom_filter:
             if not self._custom_filter(row_data, row_index):
                 return False
         
@@ -709,14 +722,31 @@ class VirtualDataModel(QAbstractTableModel):
             'last_filter_rebuild': self._last_filter_rebuild,
         }
     
-    def clear_all_data(self) -> None:
-        """Clear all data from the model"""
+    def clear_all_data(self):
+        """
+        Completely clear all data from the model
+        """
+        # Notify view that model is about to reset
         self.beginResetModel()
+        
+        # Clear all data structures
         self._raw_data.clear()
         self._row_count = 0
         self._visible_rows.clear()
+        self._display_cache.clear()
+        self._user_data_cache.clear()
+        self._sort_cache.clear()
+        self._sort_cache.clear()
+        
+        # Reset filters
+        self._filter_active = False
         self._filters.clear()
-        self._invalidate_caches()
+        self._text_filter_active = False
+        self._text_filter_matches.clear()
+        self._custom_filter_active = False
+        self._custom_filter = None
+        
+        # Notify view that model has reset
         self.endResetModel()
     
     def load_from_list(self, data_list: List[Dict[str, Any]]) -> None:
@@ -793,14 +823,13 @@ class VirtualDataModel(QAbstractTableModel):
             del self._user_data_cache[key]
         
         # Invalidate sort cache if exists
-        if hasattr(self, '_sort_cache'):
-            keys_to_remove = []
-            for key in self._sort_cache:
-                if key.startswith(f"{actual_row}_"):
-                    keys_to_remove.append(key)
-            
-            for key in keys_to_remove:
-                del self._sort_cache[key]
+        keys_to_remove = []
+        for key in self._sort_cache:
+            if key.startswith(f"{actual_row}_"):
+                keys_to_remove.append(key)
+        
+        for key in keys_to_remove:
+            del self._sort_cache[key]
 
     def batch_update_rows(self, updates: Dict[int, Dict[str, Any]]) -> bool:
         """
@@ -1140,8 +1169,7 @@ class VirtualDataModel(QAbstractTableModel):
         """
         Clear text-based filter
         """
-        if hasattr(self, '_text_filter_options'):
-            self._text_filter_options = {}
+        self._text_filter_options = {}
         self._text_filter_active = False
         self._rebuild_visible_rows()
         
@@ -1162,11 +1190,7 @@ class VirtualDataModel(QAbstractTableModel):
             return False
         
         actual_row = self._visible_rows[visible_row]
-        
-        # Initialize styling cache if needed
-        if not hasattr(self, '_row_styles'):
-            self._row_styles = {}
-        
+
         # Convert string color to QColor if needed
         if isinstance(color, str):
             from PyQt6.QtGui import QColor
@@ -1201,10 +1225,6 @@ class VirtualDataModel(QAbstractTableModel):
         
         actual_row = self._visible_rows[visible_row]
         
-        # Initialize styling cache if needed
-        if not hasattr(self, '_row_styles'):
-            self._row_styles = {}
-        
         # Convert string color to QColor if needed
         if isinstance(color, str):
             from PyQt6.QtGui import QColor
@@ -1230,7 +1250,7 @@ class VirtualDataModel(QAbstractTableModel):
         Args:
             visible_row: Optional visible row index. If None, clear all styles.
         """
-        if not hasattr(self, '_row_styles') or not self._row_styles:
+        if not self._row_styles:
             return
         
         if visible_row is None:
@@ -1440,7 +1460,7 @@ class VirtualDataModel(QAbstractTableModel):
             'cache': {
                 'display_cache': len(self._display_cache),
                 'user_cache': len(self._user_data_cache),
-                'row_styles': len(self._row_styles) if hasattr(self, '_row_styles') else 0
+                'row_styles': len(self._row_styles)
             }
         }
         

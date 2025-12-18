@@ -180,18 +180,17 @@ class DetailPanel(QWidget):
         self.cover_label.setText("")
         
         try:
-            if hasattr(self.main_window, 'web_controller'):
-                # Request larger image for detail panel (e.g., 300x400)
-                pixmap = self.main_window.web_controller.get_cover_image(
-                    websign, 
-                    size=(300, 400)  # Larger size for detail panel
-                )
-                
-                if pixmap and not pixmap.isNull():
-                    self.display_cover_pixmap(pixmap)
-                    return
-                else:
-                    self.show_no_cover_state()
+            # Request larger image for detail panel (e.g., 300x400)
+            pixmap = self.main_window.web_controller.get_cover_image(
+                websign, 
+                size=(300, 400)  # Larger size for detail panel
+            )
+            
+            if pixmap and not pixmap.isNull():
+                self.display_cover_pixmap(pixmap)
+                return
+            else:
+                self.show_no_cover_state()
         
         except Exception as e:
             print(f"Error loading cover image: {e}")

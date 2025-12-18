@@ -137,9 +137,6 @@ class VirtualGridView(QListView):
             return
             
         # Get widget from delegate's pool
-        if not hasattr(self.delegate, 'widget_pool'):
-            return
-            
         widget = self.delegate.widget_pool.acquire_widget(row, row_data)
         if not widget:
             return
@@ -163,23 +160,7 @@ class VirtualGridView(QListView):
         
     def _get_row_data(self, row, model):
         """Extract row data from model"""
-        if hasattr(model, 'get_row_data'):
-            return model.get_row_data(row)
-            
-        # Fallback: manually extract data
-        row_data = {}
-        columns = ['websign', 'author', 'title', 'group', 'show', 
-                   'magazine', 'origin', 'tag', 'read_status', 'progress', 'file_path']
-        
-        for i, column in enumerate(columns):
-            if i >= model.columnCount():
-                break
-                
-            index = model.index(row, i)
-            value = model.data(index, Qt.ItemDataRole.DisplayRole)
-            row_data[column] = str(value) if value is not None else ""
-            
-        return row_data
+        return model.get_row_data(row)
         
     def _update_widget_position(self, row):
         """Update position of existing widget"""
@@ -333,32 +314,30 @@ class VirtualGridView(QListView):
         self.selectionModel().select(index, self.selectionModel().SelectionFlag.Select)
         
         # Open viewer using main window's handler
-        if hasattr(self.main_window, 'on_table_double_click'):
-            self.main_window.on_table_double_click(index)
+        self.main_window.on_table_double_click(index)
 
     def set_main_window_model(self):
         """
         Set the model from main window's table
         This should be called after main window initialization
         """
-        if hasattr(self.main_window, 'table') and hasattr(self.main_window.table, 'get_model'):
-            model = self.main_window.table.get_model()
-            if model:
-                # Store reference to source model
-                self.source_model = model
-                
-                # Set model to the view
-                self.setModel(model)
-                print(f"[VirtualGridView] Model set with {model.rowCount()} rows")
-                
-                # Connect to model signals for data changes
-                model.dataChanged.connect(self._on_model_data_changed)
-                model.rowsInserted.connect(self._on_rows_inserted)
-                model.rowsRemoved.connect(self._on_rows_removed)
-                model.layoutChanged.connect(self._on_model_layout_changed)
-                
-                # Update visible items after model is set
-                QTimer.singleShot(100, self.update_visible_items)
+        model = self.main_window.table.get_model()
+        if model:
+            # Store reference to source model
+            self.source_model = model
+            
+            # Set model to the view
+            self.setModel(model)
+            print(f"[VirtualGridView] Model set with {model.rowCount()} rows")
+            
+            # Connect to model signals for data changes
+            model.dataChanged.connect(self._on_model_data_changed)
+            model.rowsInserted.connect(self._on_rows_inserted)
+            model.rowsRemoved.connect(self._on_rows_removed)
+            model.layoutChanged.connect(self._on_model_layout_changed)
+            
+            # Update visible items after model is set
+            QTimer.singleShot(100, self.update_visible_items)
 
     def _on_model_data_changed(self, top_left, bottom_right, roles):
         """Handle data changes in the model"""
@@ -367,7 +346,7 @@ class VirtualGridView(QListView):
             if row in self._visible_widgets:
                 # Update existing widget
                 widget = self._visible_widgets[row]
-                if hasattr(widget, 'update_content') and self.model():
+                if self.model():
                     row_data = self._get_row_data(row, self.model())
                     widget.update_content(row_data, row)
         
@@ -388,8 +367,7 @@ class VirtualGridView(QListView):
         for row in range(first, last + 1):
             if row in self._visible_widgets:
                 widget = self._visible_widgets[row]
-                if hasattr(self.delegate, 'widget_pool'):
-                    self.delegate.widget_pool.release_widget(row)
+                self.delegate.widget_pool.release_widget(row)
                 widget.hide()
                 widget.setParent(None)
                 del self._visible_widgets[row]
@@ -517,8 +495,7 @@ class VirtualGridView(QListView):
         super().selectionChanged(selected, deselected)
         
         # Notify main window
-        if hasattr(self.main_window, 'on_grid_selection_changed'):
-            self.main_window.on_grid_selection_changed()
+        self.main_window.on_grid_selection_changed()
 
     def showEvent(self, event):
         """Handle show event - load images when grid becomes visible"""
@@ -533,17 +510,15 @@ class VirtualGridView(QListView):
             return
             
         for row, widget in self._visible_widgets.items():
-            if hasattr(widget, 'load_cover_image'):
-                # Schedule image loading
-                QTimer.singleShot(0, widget.load_cover_image)
+            # Schedule image loading
+            QTimer.singleShot(0, widget.load_cover_image)
 
     def refresh_images(self):
         """Refresh all visible widget images"""
         # Reload images for all visible widgets
         for row, widget in self._visible_widgets.items():
-            if hasattr(widget, 'load_cover_image'):
-                # Use singleShot to prevent UI freezing
-                QTimer.singleShot(0, widget.load_cover_image)
+            # Use singleShot to prevent UI freezing
+            QTimer.singleShot(0, widget.load_cover_image)
         
         # Also update visible items to catch any new widgets
         self.update_visible_items()

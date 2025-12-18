@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import QTableWidgetItem, QMessageBox
-from PyQt6.QtCore import Qt, QObject, pyqtSignal
+from PyQt6.QtCore import Qt, QObject, pyqtSignal, QTimer
 from PyQt6.QtGui import QColor, QBrush
 import re
 import os
@@ -16,21 +16,37 @@ class TableController(QObject):
         self.is_filtered = False
         self.original_row_visibility = []
 
+        # Delay timer for debounced rebuild
+        self.rebuild_timer = QTimer()
+        self.rebuild_timer.setSingleShot(True)
+        self.rebuild_timer.timeout.connect(self._perform_delayed_rebuild)
+        
+        # Rebuild delay in milliseconds (adjustable)
+        self.rebuild_delay_ms = 500
+
+        # Dictionary to track skip settings for each batch session
+        # Key: batch_session_id, Value: True if skipping duplicates for this session
+        self.batch_skip_duplicates = {}
+
+        # Current active batch session ID (None for regular single additions)
+        self.current_batch_session = None
+
+        # Connect to model signals
+        model = main_window.table.data_model
+        model.rowsRemoved.connect(self.on_rows_removed)
+
         self.current_search_row = -1
         self.last_search_options = None
     
-    def add_to_table(self, data):
+    def add_to_table(self, data, batch_session_id=None):
         """
         Add parsed data to virtual table and track duplicates
         
         Args:
             data: Tuple with 7, 8, 10, or 11 parameters
+            batch_session_id: Optional ID for batch operations
         """
         # Get virtual model from main window
-        if not hasattr(self.main_window.table, 'get_model'):
-            print("Error: Virtual model not available")
-            return
-        
         model = self.main_window.table.get_model()
         
         # Process data based on parameter count
@@ -42,16 +58,21 @@ class TableController(QObject):
         # Check for duplicate before adding
         websign = processed_data.get('websign', '')
         
-        if websign and websign in self.websign_tracker:
+        # Determine if we should check for duplicates
+        should_check = self._should_check_duplicate(websign, batch_session_id)
+        
+        if should_check:
             # Show warning for duplicate
             duplicate_rows = self.websign_tracker[websign]
             response = self.show_duplicate_warning(websign, duplicate_rows)
             
             if response == QMessageBox.StandardButton.No:
                 return  # Don't add duplicate
-            elif response == QMessageBox.StandardButton.YesToAll:
-                # Add all duplicates without asking
-                pass
+            elif response == QMessageBox.StandardButton.YesToAll and batch_session_id:
+                # Set flag to skip all duplicates for this batch session
+                self.batch_skip_duplicates[batch_session_id] = True
+                print(f"[INFO] Skipping duplicates for batch session: {batch_session_id}")
+                # Continue to add the current duplicate
         
         # Add to virtual model
         model.add_row(processed_data)
@@ -59,20 +80,118 @@ class TableController(QObject):
         # Get the new row's visible index (last row)
         new_visible_row = model.rowCount() - 1
         
-        # Update websign tracker
+        # INCREMENTAL UPDATE - 快速路径
         if websign:
-            if websign not in self.websign_tracker:
-                self.websign_tracker[websign] = []
-            self.websign_tracker[websign].append(new_visible_row)
-            
-            # Highlight if duplicate
-            if len(self.websign_tracker[websign]) > 1:
-                self.highlight_duplicate_rows(websign)
+            if websign in self.websign_tracker:
+                # Add to existing entry
+                self.websign_tracker[websign].append(new_visible_row)
+                
+                # Highlight if now a duplicate
+                if len(self.websign_tracker[websign]) == 2:
+                    # First time becoming duplicate, highlight both rows
+                    for row in self.websign_tracker[websign]:
+                        model.set_row_background(row, '#FFE6E6')
+                elif len(self.websign_tracker[websign]) > 2:
+                    # Already duplicate, just highlight new row
+                    model.set_row_background(new_visible_row, '#FFE6E6')
+            else:
+                # New unique websign
+                self.websign_tracker[websign] = [new_visible_row]
+        
+        # Schedule a delayed rebuild for consistency
+        self._schedule_rebuild()
         
         # Emit data added signal
         self.data_added.emit()
         
         print(f"Added row with websign: {websign}, total rows: {model.get_total_rows()}")
+
+    def _perform_delayed_rebuild(self):
+        """
+        Delayed rebuild of websign tracker for consistency
+        Called after a delay to batch multiple changes
+        """
+        model = self.main_window.table.get_model()
+        
+        if not model:
+            return
+        
+        # Perform full rebuild from scratch
+        self.websign_tracker.clear()
+        model.clear_row_styles()
+        
+        # Build frequency map
+        websign_frequency = {}
+        for visible_row in range(model.rowCount()):
+            row_data = model.get_row_data(visible_row)
+            websign = row_data.get('websign', '')
+            
+            if websign:
+                if websign not in websign_frequency:
+                    websign_frequency[websign] = []
+                websign_frequency[websign].append(visible_row)
+        
+        # Only track duplicates and highlight them
+        for websign, rows in websign_frequency.items():
+            if len(rows) > 1:
+                self.websign_tracker[websign] = rows
+                # Highlight duplicate rows
+                for row in rows:
+                    model.set_row_background(row, '#FFE6E6')
+        
+        unique_count = len(websign_frequency)
+        duplicate_count = len(self.websign_tracker)
+        
+        print(f"[PERF] Delayed websign tracker rebuild: {unique_count} unique websigns, {duplicate_count} with duplicates")
+
+    def _schedule_rebuild(self):
+        """Schedule a debounced websign tracker rebuild"""
+        # Restart the timer (debounce)
+        self.rebuild_timer.start(self.rebuild_delay_ms)
+
+    def _should_check_duplicate(self, websign, batch_session_id):
+        """
+        Determine if duplicate check should be performed
+        
+        Args:
+            websign: The websign to check
+            batch_session_id: Current batch session ID
+            
+        Returns:
+            bool: True if duplicate check should be performed
+        """
+        if not websign or websign not in self.websign_tracker:
+            return False
+        
+        # If this is part of a batch session
+        if batch_session_id:
+            # Check if user has chosen to skip duplicates for this session
+            if self.batch_skip_duplicates.get(batch_session_id, False):
+                return False
+            return True
+        
+        # For single additions (no batch session), always check
+        return True
+
+    def start_batch_import(self):
+        """
+        Start a new batch import session
+        Returns a unique session ID
+        """
+        import uuid
+        session_id = f"batch_{uuid.uuid4().hex[:8]}"
+        # Initialize with False (don't skip duplicates by default)
+        self.batch_skip_duplicates[session_id] = False
+        print(f"[INFO] Started batch import session: {session_id}")
+        return session_id
+
+    def end_batch_import(self, session_id):
+        """
+        Clean up batch import session
+        """
+        if session_id in self.batch_skip_duplicates:
+            del self.batch_skip_duplicates[session_id]
+            print(f"[INFO] Ended batch import session: {session_id}")
 
     def _process_input_data(self, data):
         """
@@ -203,9 +322,6 @@ class TableController(QObject):
         Args:
             options: Search options dictionary
         """
-        if not hasattr(self.main_window.table, 'get_model'):
-            return
-        
         # Note: VirtualDataModel currently doesn't have text search filters
         # We need to implement this or use a different approach
         
@@ -232,10 +348,6 @@ class TableController(QObject):
             return
         
         # Get virtual model
-        if not hasattr(self.main_window.table, 'get_model'):
-            print("Error: Virtual model not available")
-            return
-        
         model = self.main_window.table.get_model()
         
         # Extract search parameters
@@ -350,23 +462,18 @@ class TableController(QObject):
                 print(f"Error in filter function: {e}")
         
         # Apply the filter
-        if hasattr(model, 'apply_advanced_filter'):
-            model.apply_advanced_filter(text_filter)
-            self.is_filtered = True
-            
-            visible_count = model.rowCount()
-            total_count = model.get_total_rows() if hasattr(model, 'get_total_rows') else 0
-            
-            print(f"Applied text filter: {visible_count}/{total_count} rows visible")
-            print(f"  Condition1: {col1_name} contains '{search_text1}'")
-            if condition2:
-                print(f"  Condition2: {col2_name} contains '{search_text2}'")
-                print(f"  Logic: {logic}")
-            print(f"  Regex: {use_regex}, Case-sensitive: {case_sensitive}")
-        else:
-            print("Error: Model doesn't support advanced filtering")
-            QMessageBox.warning(self.main_window, "Filter Error", 
-                            "The data model doesn't support text filtering.")
+        model.apply_advanced_filter(text_filter)
+        self.is_filtered = True
+        
+        visible_count = model.rowCount()
+        total_count = model.get_total_rows()
+        
+        print(f"Applied text filter: {visible_count}/{total_count} rows visible")
+        print(f"  Condition1: {col1_name} contains '{search_text1}'")
+        if condition2:
+            print(f"  Condition2: {col2_name} contains '{search_text2}'")
+            print(f"  Logic: {logic}")
+        print(f"  Regex: {use_regex}, Case-sensitive: {case_sensitive}")
 
     def save_current_visibility(self):
         """
@@ -374,10 +481,6 @@ class TableController(QObject):
         
         Note: In virtual model, we save the current visible row indices
         """
-        if not hasattr(self.main_window.table, 'get_model'):
-            self.original_row_visibility = []
-            return
-        
         model = self.main_window.table.get_model()
         
         # Save current visible rows
@@ -389,9 +492,6 @@ class TableController(QObject):
         """
         Reset search filter using virtual model capabilities
         """
-        if not hasattr(self.main_window.table, 'get_model'):
-            return
-        
         model = self.main_window.table.get_model()
         
         if self.is_filtered:
@@ -399,12 +499,10 @@ class TableController(QObject):
             model.clear_filters()
             
             # Clear text filter if supported
-            if hasattr(model, 'clear_text_filter'):
-                model.clear_text_filter()
+            model.clear_text_filter()
             
             # Clear advanced filter if supported
-            if hasattr(model, 'clear_advanced_filter'):
-                model.clear_advanced_filter()
+            model.clear_advanced_filter()
             
             print("Cleared all filters")
         
@@ -420,9 +518,6 @@ class TableController(QObject):
         Returns:
             dict: Filter information
         """
-        if not hasattr(self.main_window.table, 'get_model'):
-            return {}
-        
         model = self.main_window.table.get_model()
         
         info = {
@@ -433,12 +528,10 @@ class TableController(QObject):
         }
         
         # Get total rows
-        if hasattr(model, 'get_total_rows'):
-            info['total_rows'] = model.get_total_rows()
+        info['total_rows'] = model.get_total_rows()
         
         # Get filter state from model
-        if hasattr(model, 'get_filter_state'):
-            info['filter_details'] = model.get_filter_state()
+        info['filter_details'] = model.get_filter_state()
         
         return info
 
@@ -446,9 +539,6 @@ class TableController(QObject):
         """
         Calculate visible row count from virtual model
         """
-        if not hasattr(self.main_window.table, 'get_model'):
-            return 0
-        
         model = self.main_window.table.get_model()
         return model.rowCount()
 
@@ -456,9 +546,6 @@ class TableController(QObject):
         """
         Update search button text and behavior based on filter state
         """
-        if not hasattr(self.main_window, 'search_button'):
-            return
-        
         search_button = self.main_window.search_button
         
         try:
@@ -481,61 +568,49 @@ class TableController(QObject):
         Args:
             options: Search options dictionary
         """
-        if not hasattr(self, 'current_search_row'):
-            self.current_search_row = -1
-        
         if not options:
             return
         
         # Get virtual model
-        if not hasattr(self.main_window.table, 'get_model'):
-            return
-        
         model = self.main_window.table.get_model()
         
         # Search for matching rows
-        if hasattr(model, 'search_rows'):
-            matching_rows = model.search_rows(options)
-            
-            if not matching_rows:
-                QMessageBox.warning(self.main_window, "Search", 
-                                    "Cannot find the specified text.")
-                self.current_search_row = 0
-                return
-            
-            # Find next match from current position
-            for i, row in enumerate(matching_rows):
-                if row > self.current_search_row:
-                    self.current_search_row = row
-                    
-                    # Select the row in table
-                    if hasattr(self.main_window.table, 'selectRow'):
-                        self.main_window.table.selectRow(row)
-                    
-                    # Update for next search
-                    if i == len(matching_rows) - 1:
-                        self.current_search_row = 0  # Wrap around
-                    else:
-                        self.current_search_row = row + 1
-                    return
-            
-            # If we get here, no matches after current position
-            reply = QMessageBox.question(self.main_window, "Search", 
-                                    "Cannot find more occurrences. Search from the beginning?",
-                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            
-            if reply == QMessageBox.StandardButton.Yes:
-                self.current_search_row = 0
-                if matching_rows:
-                    row = matching_rows[0]
+        matching_rows = model.search_rows(options)
+        
+        if not matching_rows:
+            QMessageBox.warning(self.main_window, "Search", 
+                                "Cannot find the specified text.")
+            self.current_search_row = 0
+            return
+        
+        # Find next match from current position
+        for i, row in enumerate(matching_rows):
+            if row > self.current_search_row:
+                self.current_search_row = row
+                
+                # Select the row in table
+                self.main_window.table.selectRow(row)
+                
+                # Update for next search
+                if i == len(matching_rows) - 1:
+                    self.current_search_row = 0  # Wrap around
+                else:
                     self.current_search_row = row + 1
-                    if hasattr(self.main_window.table, 'selectRow'):
-                        self.main_window.table.selectRow(row)
-            else:
-                self.current_search_row = 0
+                return
+        
+        # If we get here, no matches after current position
+        reply = QMessageBox.question(self.main_window, "Search", 
+                                "Cannot find more occurrences. Search from the beginning?",
+                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            self.current_search_row = 0
+            if matching_rows:
+                row = matching_rows[0]
+                self.current_search_row = row + 1
+                self.main_window.table.selectRow(row)
         else:
-            QMessageBox.warning(self.main_window, "Search Error", 
-                                "Search not supported in current model.")
+            self.current_search_row = 0
 
     def filter_table(self, options):
         """
@@ -548,10 +623,6 @@ class TableController(QObject):
             return
         
         # Get virtual model
-        if not hasattr(self.main_window.table, 'get_model'):
-            print("Error: Virtual model not available")
-            return
-        
         model = self.main_window.table.get_model()
         
         # Save current visibility state if it's the first filter
@@ -569,7 +640,7 @@ class TableController(QObject):
             
             # Show result count
             visible_count = self.get_visible_row_count()
-            total_count = model.get_total_rows() if hasattr(model, 'get_total_rows') else 0
+            total_count = model.get_total_rows()
             
             if visible_count == 0:
                 QMessageBox.information(self.main_window, "Filter", 
@@ -592,17 +663,7 @@ class TableController(QObject):
         if websign not in self.websign_tracker:
             return
         
-        # Get virtual model
-        if not hasattr(self.main_window.table, 'get_model'):
-            return
-        
         model = self.main_window.table.get_model()
-        
-        # Check if model supports styling
-        if not hasattr(model, 'set_row_background'):
-            print("Warning: Virtual model doesn't support styling")
-            return
-        
         duplicate_rows = self.websign_tracker[websign]
         
         if len(duplicate_rows) > 1:
@@ -617,15 +678,7 @@ class TableController(QObject):
         Re-apply duplicate highlighting using virtual model styling
         """
         # Get virtual model
-        if not hasattr(self.main_window.table, 'get_model'):
-            return
-        
         model = self.main_window.table.get_model()
-        
-        # Check if model supports styling
-        if not hasattr(model, 'clear_row_styles'):
-            print("Warning: Virtual model doesn't support styling")
-            return
         
         # Clear all existing styling
         model.clear_row_styles()
@@ -635,8 +688,7 @@ class TableController(QObject):
             if len(rows) > 1:
                 # Highlight all duplicate rows with light red
                 for visible_row in rows:
-                    if hasattr(model, 'set_row_background'):
-                        model.set_row_background(visible_row, '#FFE6E6')
+                    model.set_row_background(visible_row, '#FFE6E6')
         
         print(f"Reapplied duplicate highlighting for {len(self.websign_tracker)} websigns")
 
@@ -675,48 +727,37 @@ class TableController(QObject):
     def rebuild_websign_tracker(self):
         """
         Rebuild the websign tracker from virtual model data
-        
-        Returns:
-            dict: Updated websign tracker
         """
-        if not hasattr(self.main_window.table, 'get_model'):
-            return self.websign_tracker
-        
         model = self.main_window.table.get_model()
+        
+        # Clear ALL row styles first
+        model.clear_row_styles()
+        
         self.websign_tracker.clear()
         
-        # Check if model supports duplicate finding
-        if hasattr(model, 'find_duplicates'):
-            # Use model's efficient duplicate finding
-            duplicates = model.find_duplicates('websign')
+        # Build websign frequency map
+        websign_frequency = {}
+        for visible_row in range(model.rowCount()):
+            row_data = model.get_row_data(visible_row)
+            websign = row_data.get('websign', '')
             
-            for websign, visible_rows in duplicates.items():
-                self.websign_tracker[websign] = visible_rows
-                
-                # Apply highlighting if there are duplicates
-                if len(visible_rows) > 1:
-                    self.highlight_duplicate_rows(websign)
-        else:
-            # Fallback: manual processing
-            for visible_row in range(model.rowCount()):
-                row_data = model.get_row_data(visible_row)
-                websign = row_data.get('websign', '')
-                
-                if websign:
-                    if websign not in self.websign_tracker:
-                        self.websign_tracker[websign] = []
-                    self.websign_tracker[websign].append(visible_row)
-                    
-                    # Update duplicate highlighting
-                    if len(self.websign_tracker[websign]) > 1:
-                        self.highlight_duplicate_rows(websign)
+            if websign:
+                if websign not in websign_frequency:
+                    websign_frequency[websign] = []
+                websign_frequency[websign].append(visible_row)
         
-        print(f"Rebuilt websign tracker: {len(self.websign_tracker)} unique websigns")
+        # Only keep duplicates in tracker and highlight them
+        for websign, rows in websign_frequency.items():
+            if len(rows) > 1:
+                self.websign_tracker[websign] = rows
+                # Highlight duplicate rows
+                for row in rows:
+                    model.set_row_background(row, '#FFE6E6')
         
-        # Report duplicates
-        duplicate_count = sum(1 for rows in self.websign_tracker.values() if len(rows) > 1)
-        if duplicate_count > 0:
-            print(f"Found {duplicate_count} websigns with duplicates")
+        unique_count = len(websign_frequency)
+        duplicate_count = len(self.websign_tracker)
+        
+        print(f"Rebuilt websign tracker: {unique_count} unique websigns, {duplicate_count} with duplicates")
         
         return self.websign_tracker
     
@@ -728,9 +769,6 @@ class TableController(QObject):
             rows: Single row index or list of row indices
             progress: Progress percentage (0-100)
         """
-        if not hasattr(self.main_window.table, 'get_model'):
-            return
-        
         if not isinstance(rows, list):
             rows = [rows]
         
@@ -791,17 +829,8 @@ class TableController(QObject):
         Args:
             updates: Dict of {row_index: data_dict} updates
         """
-        if not hasattr(self.main_window.table, 'get_model'):
-            return
-        
         model = self.main_window.table.get_model()
-        
-        if hasattr(model, 'batch_update_rows'):
-            model.batch_update_rows(updates)
-        else:
-            # Fallback: update rows individually
-            for row, data in updates.items():
-                model.update_row(row, data)
+        model.batch_update_rows(updates)
 
     def get_table_statistics(self):
         """
@@ -810,9 +839,6 @@ class TableController(QObject):
         Returns:
             dict: Statistics including row counts, cache performance, etc.
         """
-        if not hasattr(self.main_window.table, 'get_model'):
-            return {}
-        
         model = self.main_window.table.get_model()
         
         stats = {
@@ -822,9 +848,8 @@ class TableController(QObject):
         }
         
         # Add performance stats if available
-        if hasattr(model, 'get_performance_stats'):
-            perf_stats = model.get_performance_stats()
-            stats.update(perf_stats)
+        perf_stats = model.get_performance_stats()
+        stats.update(perf_stats)
         
         return stats
 
@@ -835,9 +860,6 @@ class TableController(QObject):
         Returns:
             dict: Performance statistics
         """
-        if not hasattr(self.main_window.table, 'get_model'):
-            return {}
-        
         model = self.main_window.table.get_model()
         
         stats = {
@@ -849,44 +871,13 @@ class TableController(QObject):
         }
         
         # Get model performance stats
-        if hasattr(model, 'get_performance_stats'):
-            model_stats = model.get_performance_stats()
-            stats['virtual_model'] = model_stats
+        model_stats = model.get_performance_stats()
+        stats['virtual_model'] = model_stats
         
         # Get filter info
         stats['filters'] = self.get_filter_info()
         
         return stats
-
-    def print_debug_info(self):
-        """
-        Print debug information about current state
-        """
-        print("\n=== TableController Debug Info ===")
-        
-        # Basic info
-        print(f"Filter active: {self.is_filtered}")
-        print(f"Visible rows: {self.get_visible_row_count()}")
-        print(f"Websign tracker entries: {len(self.websign_tracker)}")
-        
-        # Duplicate info
-        dup_count = sum(1 for rows in self.websign_tracker.values() if len(rows) > 1)
-        print(f"Duplicate websigns: {dup_count}")
-        
-        # Model info
-        if hasattr(self.main_window.table, 'get_model'):
-            model = self.main_window.table.get_model()
-            print(f"Model total rows: {model.get_total_rows()}")
-            print(f"Model visible rows: {model.rowCount()}")
-        
-        # Performance stats
-        stats = self.get_performance_stats()
-        if stats.get('virtual_model'):
-            perf = stats['virtual_model']
-            hit_rate = perf.get('cache_hit_rate', 0)
-            print(f"Cache hit rate: {hit_rate:.1f}%")
-        
-        print("================================\n")
 
     def get_current_filter_info(self):
         """
@@ -895,24 +886,36 @@ class TableController(QObject):
         Returns:
             dict: Filter information
         """
-        if not hasattr(self.main_window.table, 'get_model'):
-            return {}
-        
         model = self.main_window.table.get_model()
         
         info = {
             'is_filtered': self.is_filtered,
             'visible_rows': self.get_visible_row_count(),
-            'total_rows': model.get_total_rows() if hasattr(model, 'get_total_rows') else 0,
+            'total_rows': model.get_total_rows(),
             'filter_type': 'none'
         }
         
         # Check what type of filter is active
-        if hasattr(model, '_text_filter_active') and model._text_filter_active:
+        if model._text_filter_active:
             info['filter_type'] = 'text_filter'
-        elif hasattr(model, '_custom_filter_active') and model._custom_filter_active:
+        elif model._custom_filter_active:
             info['filter_type'] = 'custom_filter'
-        elif hasattr(model, '_filters') and model._filters:
+        elif model._filters:
             info['filter_type'] = 'status_tag_filter'
         
         return info
+    
+    def clear_duplicate_highlights(self):
+        """Clear all duplicate highlighting from the table"""
+        # Assuming you have a method to clear highlighting
+        # This depends on how you highlight duplicates
+        
+        # Example: If you set background color, reset it
+        self.main_window.table.clear_highlights()
+
+    def on_rows_removed(self, parent, first, last):
+        """
+        Handle rows being removed from model
+        """
+        # Rebuild websign tracker after a short delay
+        QTimer.singleShot(50, self.rebuild_websign_tracker)

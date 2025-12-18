@@ -564,8 +564,11 @@ class WebController:
         
         if tags:
             tag_text = ", ".join(tags)
-            tag_item = QTableWidgetItem(tag_text)
-            self.main_window.table.setItem(row, 7, tag_item)
+            # Update through model instead of setItem
+            model = self.main_window.table.model()
+            if model:
+                index = model.index(row, 7)  # column 7 is tag column
+                model.setData(index, tag_text, Qt.ItemDataRole.EditRole)
             QMessageBox.information(self.main_window, "Update Tag", 
                                 f"Successfully updated tags for websign {self.main_window.get_cell_text(row, 0)}:\n\n{tag_text}")
         else:
@@ -652,27 +655,24 @@ class TagFetchThread(QThread):
                     break
                     
                 # Get websign for current row
-                websign_item = self.main_window.table.item(row, 0)
+                websign_item = self.main_window.get_cell_text(row, 0)
                 if not websign_item:
-                    continue
-                    
-                websign = websign_item.data(Qt.ItemDataRole.UserRole)
-                if not websign:
-                    websign = websign_item.text()
-                
-                if not websign:
                     continue
                 
                 # Fetch tags from website
-                url = f"https://{jm_website}/album/{websign}"
+                url = f"https://{jm_website}/album/{websign_item}"
                 tags = self.fetch_tags_from_url(url)
                 
                 if self.is_batch:
                     # Batch mode: update table directly
                     if tags:
                         tag_text = ", ".join(tags)
-                        tag_item = QTableWidgetItem(tag_text)
-                        self.main_window.table.setItem(row, 7, tag_item)
+                        # Get the model index for the tag column (column 7)
+                        model = self.main_window.table.model()
+                        if model:
+                            index = model.index(row, 7)  # column 7 is tag column
+                            # Update the data
+                            model.setData(index, tag_text, Qt.ItemDataRole.EditRole)
                 else:
                     # Single mode: emit signal for UI update
                     self.single_finished.emit(row, tags if tags else [])

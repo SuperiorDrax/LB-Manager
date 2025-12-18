@@ -44,11 +44,9 @@ class ComicCardDelegate(QStyledItemDelegate):
         self.cover_size = QSize(120, 170)
         
         # Connect to model signals if available
-        if hasattr(main_window, 'table') and hasattr(main_window.table, 'get_model'):
-            model = main_window.table.get_model()
-            if model:
-                model.dataChanged.connect(self.on_model_data_changed)
-                model.layoutChanged.connect(self.on_model_layout_changed)
+        model = main_window.table.get_model()
+        model.dataChanged.connect(self.on_model_data_changed)
+        model.layoutChanged.connect(self.on_model_layout_changed)
                 
     def sizeHint(self, option, index):
         """
@@ -210,18 +208,6 @@ class ComicCardDelegate(QStyledItemDelegate):
         painter.drawRoundedRect(rect, 6, 6)
         painter.restore()
         
-    def createEditor(self, parent, option, index):
-        """
-        Create editor for item - not used for comic cards
-        """
-        return None
-        
-    def updateEditorGeometry(self, editor, option, index):
-        """
-        Update editor geometry - not used for comic cards
-        """
-        pass
-        
     def editorEvent(self, event, model, option, index):
         """
         Handle editor events (mouse interactions)
@@ -296,21 +282,7 @@ class ComicCardDelegate(QStyledItemDelegate):
         """
         Get row data from model
         """
-        if hasattr(model, 'get_row_data'):
-            return model.get_row_data(row)
-        
-        # Fallback: create basic row data
-        row_data = {}
-        columns = ['websign', 'author', 'title', 'group', 'show', 
-                'magazine', 'origin', 'tag', 'read_status', 'progress', 'file_path']
-        
-        for i, column in enumerate(columns):
-            if i < model.columnCount():
-                index = model.index(row, i)
-                value = model.data(index, Qt.ItemDataRole.DisplayRole)
-                row_data[column] = str(value) if value is not None else ""
-        
-        return row_data
+        return model.get_row_data(row)
         
     def update_visible_range(self, start_row, end_row):
         """
@@ -346,9 +318,8 @@ class ComicCardDelegate(QStyledItemDelegate):
             visible_widgets = self.widget_pool.get_visible_widgets()
             
             for row, widget in visible_widgets:
-                if hasattr(widget, 'load_cover_image'):
-                    # Schedule image loading
-                    QTimer.singleShot(0, widget.load_cover_image)
+                # Schedule image loading
+                QTimer.singleShot(0, widget.load_cover_image)
                     
         finally:
             self.is_loading_images = False
@@ -360,14 +331,13 @@ class ComicCardDelegate(QStyledItemDelegate):
         # Update affected widgets
         for row in range(top_left.row(), bottom_right.row() + 1):
             widget = self.widget_pool.get_widget_for_row(row)
-            if widget and hasattr(widget, 'update_content'):
+            if widget:
                 # Get updated row data from model
-                if hasattr(self.parent_view, 'model'):
-                    model = self.parent_view.model()
-                    if model:
-                        row_data = self.get_row_data(row, model)
-                        if row_data:
-                            widget.update_content(row_data, row)  # Pass arguments!
+                model = self.parent_view.model()
+                if model:
+                    row_data = self.get_row_data(row, model)
+                    if row_data:
+                        widget.update_content(row_data, row)  # Pass arguments!
                 
     def on_model_layout_changed(self):
         """

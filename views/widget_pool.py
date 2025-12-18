@@ -148,9 +148,6 @@ class ComicCardWidget(QFrame):
             return
             
         # Get row data from model
-        if not hasattr(self.main_window, 'table'):
-            return
-            
         model = self.main_window.table.get_model()
         if not model:
             return
@@ -166,16 +163,13 @@ class ComicCardWidget(QFrame):
             
         # Load cover using web_controller
         try:
-            if hasattr(self.main_window, 'web_controller'):
-                pixmap = self.main_window.web_controller.get_cover_image(
-                    str(websign),
-                    size=(130, 150)
-                )
-                
-                if pixmap and not pixmap.isNull():
-                    self.display_cover(pixmap)
-                else:
-                    self.show_no_cover()
+            pixmap = self.main_window.web_controller.get_cover_image(
+                str(websign),
+                size=(130, 150)
+            )
+            
+            if pixmap and not pixmap.isNull():
+                self.display_cover(pixmap)
             else:
                 self.show_no_cover()
                 
@@ -452,5 +446,4 @@ class WidgetPool:
 
     def _on_widget_clicked(self, row: int):
         """Handle widget click - forward to main window"""
-        if hasattr(self.main_window, 'on_widget_clicked'):
-            self.main_window.on_widget_clicked(row)
+        self.main_window.on_widget_clicked(row)

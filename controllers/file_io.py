@@ -46,6 +46,9 @@ class FileIO:
                                 "Invalid JSON format: missing 'data' field")
                 return
             
+            # Start batch session for this import
+            batch_session_id = self.main_window.table_controller.start_batch_import()
+            
             success_count = 0
             error_rows = []
             
@@ -82,12 +85,18 @@ class FileIO:
                         error_rows.append((index + 1, f"Missing required fields: websign='{websign}', author='{author}', title='{title}'"))
                         continue
                     
-                    # Add to table with all 11 parameters
-                    self.main_window.table_controller.add_to_table((author, title, group, show, magazine, origin, websign, tag, read_status, progress, file_path))
+                    # Add to table with batch session ID
+                    self.main_window.table_controller.add_to_table(
+                        (author, title, group, show, magazine, origin, websign, tag, read_status, progress, file_path),
+                        batch_session_id=batch_session_id
+                    )
                     success_count += 1
                     
                 except Exception as e:
                     error_rows.append((index + 1, str(e)))
+            
+            # End batch session
+            self.main_window.table_controller.end_batch_import(batch_session_id)
             
             # Update count after importing
             self.main_window.update_sidebar_counts()
@@ -124,6 +133,9 @@ class FileIO:
                 QMessageBox.critical(self.main_window, "Import Error", 
                                 f"Missing required columns in XLSX file: {', '.join(missing_columns)}")
                 return
+            
+            # Start batch session for this import
+            batch_session_id = self.main_window.table_controller.start_batch_import()
             
             success_count = 0
             error_rows = []
@@ -169,12 +181,18 @@ class FileIO:
                         error_rows.append((index + 2, f"Missing required fields: websign='{websign}', author='{author}', title='{title}'"))
                         continue
                     
-                    # Add to table with all 11 parameters
-                    self.main_window.table_controller.add_to_table((author, title, group, show, magazine, origin, websign, tag, read_status, progress, file_path))
+                    # Add to table with batch session ID
+                    self.main_window.table_controller.add_to_table(
+                        (author, title, group, show, magazine, origin, websign, tag, read_status, progress, file_path),
+                        batch_session_id=batch_session_id
+                    )
                     success_count += 1
                     
                 except Exception as e:
                     error_rows.append((index + 2, str(e)))
+            
+            # End batch session
+            self.main_window.table_controller.end_batch_import(batch_session_id)
             
             # Update count after importing
             self.main_window.update_sidebar_counts()
@@ -202,6 +220,9 @@ class FileIO:
             with open(file_path, 'r', encoding='utf-8') as file:
                 lines = file.readlines()
             
+            # Start batch session for this import
+            batch_session_id = self.main_window.table_controller.start_batch_import()
+            
             success_count = 0
             error_lines = []
             
@@ -213,10 +234,17 @@ class FileIO:
                         if parsed_data is None:
                             error_lines.append((i, line, "Missing required fields (websign, author, title) or format incorrect"))
                         else:
-                            self.main_window.table_controller.add_to_table(parsed_data)
+                            # Add to table with batch session ID
+                            self.main_window.table_controller.add_to_table(
+                                parsed_data,
+                                batch_session_id=batch_session_id
+                            )
                             success_count += 1
                     except Exception as e:
                         error_lines.append((i, line, str(e)))
+            
+            # End batch session
+            self.main_window.table_controller.end_batch_import(batch_session_id)
             
             # Show summary
             if error_lines:
@@ -304,25 +332,27 @@ class FileIO:
                 row_data = {}
                 # Process all 11 columns
                 for col in range(11):
-                    item = self.main_window.table.item(row, col)
+                    cell_value = self.main_window.get_cell_text(row, col)
                     col_name = data["columns"][col]
                     
-                    if item:
-                        if col == 0:  # websign column
-                            websign_value = item.data(Qt.ItemDataRole.UserRole)
-                            if not websign_value:
-                                websign_value = item.text()
-                            row_data[col_name] = websign_value
-                        elif col == 9:  # progress column
-                            progress_value = item.data(Qt.ItemDataRole.UserRole)
-                            if progress_value is None:
-                                progress_value = 0
+                    # Special handling for certain columns
+                    if col == 0:  # websign column
+                        row_data[col_name] = cell_value if cell_value else ""
+                        
+                    elif col == 8:  # read_status column
+                        row_data[col_name] = cell_value if cell_value else "unread"
+                        
+                    elif col == 9:  # progress column
+                        # Convert to int, default to 0
+                        try:
+                            progress_value = int(cell_value) if cell_value else 0
                             row_data[col_name] = progress_value
-                        else:
-                            # Regular columns including file_path (col=10)
-                            row_data[col_name] = item.text()
+                        except (ValueError, TypeError):
+                            row_data[col_name] = 0
+                            
                     else:
-                        row_data[col_name] = ""
+                        # Regular columns including file_path (col=10)
+                        row_data[col_name] = cell_value if cell_value else ""
                 
                 data["data"].append(row_data)
             
@@ -348,27 +378,29 @@ class FileIO:
                 row_data = []
                 # Process all 11 columns
                 for col in range(11):
-                    item = self.main_window.table.item(row, col)
-                    if item:
-                        # Handle websign special case
-                        if col == 0:  # websign column
-                            websign_value = item.data(Qt.ItemDataRole.UserRole)
-                            if not websign_value:
-                                websign_value = item.text()
-                            row_data.append(websign_value)
-                        elif col == 9:  # progress column
-                            progress_value = item.data(Qt.ItemDataRole.UserRole)
-                            if progress_value is None:
-                                progress_value = 0
+                    cell_value = self.main_window.get_cell_text(row, col)
+                    
+                    # Special handling for certain columns
+                    if col == 0:  # websign column
+                        row_data.append(cell_value if cell_value else "")
+                        
+                    elif col == 8:  # read_status column
+                        row_data.append(cell_value if cell_value else "unread")
+                        
+                    elif col == 9:  # progress column
+                        # Convert to int
+                        try:
+                            progress_value = int(cell_value) if cell_value else 0
                             row_data.append(progress_value)
-                        elif col == 10:  # file_path column
-                            # Get file_path from text
-                            row_data.append(item.text())
-                        else:
-                            # Regular columns
-                            row_data.append(item.text())
+                        except (ValueError, TypeError):
+                            row_data.append(0)
+                            
+                    elif col == 10:  # file_path column
+                        row_data.append(cell_value if cell_value else "")
+                        
                     else:
-                        row_data.append("")
+                        # Regular columns (1-7)
+                        row_data.append(cell_value if cell_value else "")
                 
                 data.append(row_data)
             
@@ -406,21 +438,13 @@ class FileIO:
         try:
             with open(file_path, 'w', encoding='utf-8') as file:
                 for row in range(self.main_window.table.rowCount()):
-                    # Get data - tag column (index 7) is ignored
-                    websign_item = self.main_window.table.item(row, 0)
-                    if websign_item:
-                        websign = websign_item.data(Qt.ItemDataRole.UserRole)
-                        if not websign:
-                            websign = websign_item.text()
-                    else:
-                        websign = ""
-                        
-                    author = self.main_window.table.item(row, 1).text() if self.main_window.table.item(row, 1) else ""
-                    title = self.main_window.table.item(row, 2).text() if self.main_window.table.item(row, 2) else ""
-                    group = self.main_window.table.item(row, 3).text() if self.main_window.table.item(row, 3) else ""
-                    show = self.main_window.table.item(row, 4).text() if self.main_window.table.item(row, 4) else ""
-                    magazine = self.main_window.table.item(row, 5).text() if self.main_window.table.item(row, 5) else ""
-                    origin = self.main_window.table.item(row, 6).text() if self.main_window.table.item(row, 6) else ""
+                    websign = self.main_window.get_cell_text(row, 0)
+                    author = self.main_window.get_cell_text(row, 1)
+                    title = self.main_window.get_cell_text(row, 2)
+                    group = self.main_window.get_cell_text(row, 3)
+                    show = self.main_window.get_cell_text(row, 4)
+                    magazine = self.main_window.get_cell_text(row, 5)
+                    origin = self.main_window.get_cell_text(row, 6)
                     
                     # Reconstruct the original format (tag is not included)
                     parts = []
@@ -469,12 +493,11 @@ class FileIO:
         duplicates = []
         
         for row in range(self.main_window.table.rowCount()):
-            websign_item = self.main_window.table.item(row, 0)
-            if websign_item and websign_item.text():
-                websign = websign_item.text()
+            websign = self.main_window.get_cell_text(row, 0)
+            if websign:  # Direct string check
                 if websign not in websign_map:
                     websign_map[websign] = []
-                websign_map[websign].append(row + 1)  # Store 1-based row numbers for user display
+                websign_map[websign].append(row + 1)
         
         # Find duplicates (websign with more than one row)
         for websign, rows in websign_map.items():

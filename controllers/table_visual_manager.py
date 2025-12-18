@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import QMenu, QMessageBox, QApplication
 from PyQt6.QtGui import QAction
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 
 class TableVisualManager:
     def __init__(self, main_window):
@@ -56,38 +56,52 @@ class TableVisualManager:
         )
         
         if reply == QMessageBox.StandardButton.Yes:
-            for row in rows:
-                self.main_window.table.removeRow(row)
-                # Update websign tracker if duplicate detection is enabled
-                if hasattr(self.main_window.table_controller, 'websign_tracker'):
-                    self.main_window.table_controller.on_row_removed(row)
+            deleted_count = 0
+            model = self.main_window.table.get_model()
             
-            # Re-apply duplicate highlighting after all deletions
-            if hasattr(self.main_window.table_controller, 'websign_tracker'):
-                self.main_window.table_controller.reapply_duplicate_highlighting()
+            # Store websigns of deleted rows for incremental cleanup
+            deleted_websigns = set()
+            for row in rows:
+                row_data = model.get_row_data(row)
+                if row_data:
+                    websign = row_data.get('websign', '')
+                    if websign:
+                        deleted_websigns.add(websign)
+            
+            # Delete rows
+            for row in rows:
+                if model.remove_row(row):
+                    deleted_count += 1
+            
+            if deleted_count > 0:
+                # Let TableController handle websign tracker cleanup via scheduled rebuild
+                if hasattr(self.main_window, 'table_controller'):
+                    self.main_window.table_controller._schedule_rebuild()
+                
+                # Refresh the view
+                self.main_window.table.viewport().update()
+                
+                # Update sidebar counts
+                QTimer.singleShot(150, self.main_window.update_sidebar_counts)
+
+                # Optional: Provide immediate visual feedback by refreshing the view
+                self.main_window.table.viewport().update()
             
             QMessageBox.information(self.main_window, "Deletion Complete", 
-                                f"Successfully deleted {len(rows)} row(s).")
+                                f"Successfully deleted {deleted_count} row(s).")
     
-    def copy_row_to_clipboard(self, row):
+    def copy_row_to_clipboard(self, row, return_text=False):
         """Copy specified row data as formatted text to clipboard"""
         try:
-        # Get row data - note new column order
-            websign_item = self.main_window.table.item(row, 0)
-            if websign_item:
-                # Handle custom websign item that might have numeric data
-                websign = websign_item.data(Qt.ItemDataRole.UserRole)  # Get original string
-                if not websign:
-                    websign = websign_item.text()
-            else:
-                websign = ""
-                
-            author = self.main_window.table.item(row, 1).text() if self.main_window.table.item(row, 1) else ""
-            title = self.main_window.table.item(row, 2).text() if self.main_window.table.item(row, 2) else ""
-            group = self.main_window.table.item(row, 3).text() if self.main_window.table.item(row, 3) else ""
-            show = self.main_window.table.item(row, 4).text() if self.main_window.table.item(row, 4) else ""
-            magazine = self.main_window.table.item(row, 5).text() if self.main_window.table.item(row, 5) else ""
-            origin = self.main_window.table.item(row, 6).text() if self.main_window.table.item(row, 6) else ""
+            # Get row data - note new column order
+            websign = self.main_window.get_cell_text(row, 0)  # Fixed: Use get_cell_text
+            
+            author = self.main_window.get_cell_text(row, 1)
+            title = self.main_window.get_cell_text(row, 2)
+            group = self.main_window.get_cell_text(row, 3)
+            show = self.main_window.get_cell_text(row, 4)
+            magazine = self.main_window.get_cell_text(row, 5)
+            origin = self.main_window.get_cell_text(row, 6)
             
             # Reconstruct the original format (format remains the same)
             parts = []
@@ -123,15 +137,20 @@ class TableVisualManager:
             # Combine into complete text
             result_text = " ".join(parts)
             
-            # Copy to clipboard
-            clipboard = QApplication.clipboard()
-            clipboard.setText(result_text)
-            
-            # Show success message
-            QMessageBox.information(self.main_window, "Copy Success", "Row data copied to clipboard!")
-            
+            if return_text:
+                return result_text  # Return text instead of copying
+            else:
+                # Copy to clipboard
+                clipboard = QApplication.clipboard()
+                clipboard.setText(result_text)
+                QMessageBox.information(self.main_window, "Copy Success", 
+                                    "Row data copied to clipboard!")
+                return result_text
+                
         except Exception as e:
-            QMessageBox.critical(self.main_window, "Copy Error", f"Failed to copy data: {str(e)}")
+            QMessageBox.critical(self.main_window, "Copy Error", 
+                            f"Failed to copy data: {str(e)}")
+            return ""
 
     def copy_rows_to_clipboard(self, rows):
         """Copy multiple rows to clipboard"""
@@ -143,12 +162,15 @@ class TableVisualManager:
         
         clipboard_text = ""
         for row in rows:
-            row_text = self.copy_row_to_clipboard(row, include_header=False)
-            clipboard_text += row_text + "\n"
+            # Get row text (don't copy individually)
+            row_text = self.copy_row_to_clipboard(row, return_text=True)
+            if row_text:
+                clipboard_text += row_text + "\n"
         
-        # Copy to clipboard
-        clipboard = QApplication.clipboard()
-        clipboard.setText(clipboard_text.strip())
-        
-        QMessageBox.information(self.main_window, "Copy", 
-                            f"Copied {len(rows)} rows to clipboard")
+        # Copy all rows at once
+        if clipboard_text:
+            clipboard = QApplication.clipboard()
+            clipboard.setText(clipboard_text.strip())
+            
+            QMessageBox.information(self.main_window, "Copy", 
+                                f"Copied {len(rows)} rows to clipboard")
